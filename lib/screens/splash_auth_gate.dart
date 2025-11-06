@@ -65,6 +65,10 @@ class _SplashAuthGateState extends State<SplashAuthGate> {
         }
       }
 
+      // Load home hierarchy for immediate visibility
+      await hierarchyProvider.loadHomeHierarchy();
+      developer.log('[SplashAuthGate] Home hierarchy loaded');
+
       // Data is loaded, proceed to show UI
       if (mounted) {
         setState(() {

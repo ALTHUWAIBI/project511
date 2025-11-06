@@ -63,11 +63,18 @@ class _SheikhProgramCreateScreenState extends State<SheikhProgramCreateScreen> {
     setState(() => _isSaving = true);
 
     try {
-      // Create program (subcategory) using LocalRepository via FirebaseService
+      // WARNING: This screen creates subcategories without categoryId
+      // This will fail validation - subcategories must have categoryId
+      // TODO: This screen should be updated to require category selection
+      // or redirect to the proper hierarchy management screen
       final firebaseService = FirebaseService();
+
+      // This will fail because categoryId is required
+      // User should use sheikh_hierarchy_manage_screen instead
       final result = await firebaseService.addSubcategory(
         name: _titleController.text.trim(),
         section: 'unknown', // TODO: Get section from context
+        categoryId: null, // WARNING: This will cause validation failure
         description: _descriptionController.text.trim(),
         iconName: null,
       );

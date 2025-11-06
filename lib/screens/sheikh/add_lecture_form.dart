@@ -1057,6 +1057,14 @@ class _AddLectureFormState extends State<AddLectureForm> {
     );
 
     if (success) {
+      // Refresh home hierarchy after successful save
+      final hierarchyProvider = Provider.of<HierarchyProvider>(
+        context,
+        listen: false,
+      );
+      hierarchyProvider.clearHomeHierarchyCache();
+      hierarchyProvider.loadHomeHierarchy(forceRefresh: true);
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

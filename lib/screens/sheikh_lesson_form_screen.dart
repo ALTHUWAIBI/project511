@@ -211,12 +211,20 @@ class _SheikhLessonFormScreenState extends State<SheikhLessonFormScreen> {
             media: _mediaUrl != null ? {'videoUrl': _mediaUrl} : null,
           );
         } else {
+          final sheikhProvider = Provider.of<SheikhProvider>(
+            context,
+            listen: false,
+          );
+          final categoryId = sheikhProvider.currentSheikhCategoryId;
           await firebaseService.addLecture(
             title: _titleController.text.trim(),
             description: _abstractController.text.trim(),
             videoPath: _mediaUrl,
             section: 'unknown',
+            categoryId: categoryId,
+            categoryName: categoryId,
             subcategoryId: _selectedChapterId,
+            subcategoryName: _selectedChapterId,
           );
         }
       }

@@ -96,25 +96,49 @@ class HierarchyService {
     int? order,
     required String createdBy,
   }) async {
-    return await _repository.addSubcategory(
+    // Log category_id being passed
+    print(
+      '[HierarchyService] Adding subcategory: name=$name, section=$section, categoryId=$categoryId',
+    );
+
+    final result = await _repository.addSubcategory(
       name: name,
       section: section,
+      categoryId: categoryId,
       description: description,
       iconName: null,
     );
+
+    // Log final category_id saved
+    if (result['success']) {
+      print(
+        '[HierarchyService] Subcategory added: id=${result['subcategory_id']}, categoryId=$categoryId',
+      );
+    }
+
+    return result;
   }
 
   /// Update subcategory
   Future<Map<String, dynamic>> updateSubcategory({
     required String subcategoryId,
     required String name,
+    String? categoryId,
     String? description,
     int? order,
     bool? isActive,
   }) async {
+    // Log category_id update if provided
+    if (categoryId != null) {
+      print(
+        '[HierarchyService] Updating subcategory: id=$subcategoryId, categoryId=$categoryId',
+      );
+    }
+
     return await _repository.updateSubcategory(
       id: subcategoryId,
       name: name,
+      categoryId: categoryId,
       description: description,
       iconName: null,
     );
@@ -135,9 +159,12 @@ class HierarchyService {
   Future<List<Map<String, dynamic>>> getSubcategoriesByCategory(
     String categoryId,
   ) async {
-    // For offline-only: Get by section instead
-    // This is a limitation - we'd need category mapping
-    return [];
+    try {
+      return await _repository.getSubcategoriesByCategory(categoryId);
+    } catch (e) {
+      print('Error loading subcategories by category: $e');
+      return [];
+    }
   }
 
   /// Get real-time stream of subcategories for a category
@@ -147,6 +174,17 @@ class HierarchyService {
   }
 
   // ==================== Lectures with Hierarchy ====================
+
+  /// Get full home hierarchy: Section → Category → Subcategory → Lectures
+  /// Single source of truth for Home screen
+  Future<Map<String, dynamic>> getHomeHierarchy() async {
+    try {
+      return await _repository.getHomeHierarchy();
+    } catch (e) {
+      print('Error loading home hierarchy: $e');
+      return {};
+    }
+  }
 
   /// Get lectures with hierarchy filtering
   Future<List<Map<String, dynamic>>> getLecturesWithHierarchy({
@@ -167,6 +205,10 @@ class HierarchyService {
   }
 
   /// Get real-time stream of lectures with hierarchy filtering
+  /// Filtering precedence:
+  /// 1. If subcategoryId present → filter by subcategory
+  /// 2. Else if categoryId present → filter by category
+  /// 3. Else → filter by section
   Stream<List<Map<String, dynamic>>> getLecturesStream({
     required String section,
     String? categoryId,
@@ -176,6 +218,8 @@ class HierarchyService {
     return Stream.periodic(const Duration(seconds: 2), (_) async {
       if (subcategoryId != null) {
         return await _repository.getLecturesBySubcategory(subcategoryId);
+      } else if (categoryId != null) {
+        return await _repository.getLecturesByCategory(categoryId);
       } else {
         return await _repository.getLecturesBySection(section);
       }

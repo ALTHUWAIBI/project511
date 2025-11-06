@@ -10,7 +10,7 @@ class AppDatabase {
   static Database? _database;
   static Future<void>? _initFuture;
   static const int _currentVersion =
-      8; // Bumped for isDeleted column and data normalization
+      9; // Bumped for category_id in subcategories
   static const String _dbName = 'main_app.db'; // Single canonical DB file name
 
   AppDatabase._internal();
@@ -277,6 +277,9 @@ class AppDatabase {
             break;
           case 8:
             await _migrationV8(db);
+            break;
+          case 9:
+            await _migrationV9(db);
             break;
           default:
             developer.log(
@@ -939,6 +942,17 @@ class AppDatabase {
         'CREATE INDEX IF NOT EXISTS idx_lectures_isDeleted ON lectures(isDeleted)',
       );
 
+      // Create composite indexes for performance
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_lectures_section_published ON lectures(section, isPublished, isDeleted)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_lectures_subcat_published ON lectures(subcategory_id, isPublished, isDeleted)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_lectures_category_published ON lectures(categoryId, isPublished, isDeleted)',
+      );
+
       // Normalize section values: Arabic → canonical keys
       final sectionMap = {
         'الفقه': 'fiqh',
@@ -983,6 +997,86 @@ class AppDatabase {
     }
 
     developer.log('[AppDatabase] Migration v8 completed');
+  }
+
+  /// Migration v9: Add category_id to subcategories table
+  /// - Adds category_id column to subcategories
+  /// - Creates index on category_id
+  Future<void> _migrationV9(Database db) async {
+    developer.log(
+      '[AppDatabase] Applying migration v9: Add category_id to subcategories',
+    );
+
+    try {
+      // Check if category_id column already exists
+      final columns = await db.rawQuery("PRAGMA table_info(subcategories)");
+      final hasCategoryId = columns.any((col) => col['name'] == 'category_id');
+
+      if (!hasCategoryId) {
+        // Add category_id column
+        await db.execute(
+          'ALTER TABLE subcategories ADD COLUMN category_id TEXT',
+        );
+        developer.log(
+          '[AppDatabase] Added category_id column to subcategories',
+        );
+      } else {
+        developer.log('[AppDatabase] category_id column already exists');
+      }
+
+      // Create index on category_id
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_subcategories_category_id ON subcategories(category_id)',
+      );
+
+      // Backfill orphaned subcategories: try to assign them to a category in the same section
+      // This is a best-effort fix - ideally subcategories should be recreated with proper category_id
+      final orphanedSubcats = await db.rawQuery(
+        "SELECT id, section FROM subcategories WHERE category_id IS NULL OR category_id = ''",
+      );
+
+      int backfilled = 0;
+      for (final subcat in orphanedSubcats) {
+        final subcatId = subcat['id'] as String?;
+        final section = subcat['section'] as String?;
+        if (subcatId == null || section == null) continue;
+
+        // Find first category in the same section
+        final categories = await db.query(
+          'categories',
+          where: 'section_id = ? AND isDeleted = ?',
+          whereArgs: [section, 0],
+          limit: 1,
+        );
+
+        if (categories.isNotEmpty) {
+          final categoryId = categories.first['id'] as String?;
+          if (categoryId != null) {
+            await db.update(
+              'subcategories',
+              {'category_id': categoryId},
+              where: 'id = ?',
+              whereArgs: [subcatId],
+            );
+            backfilled++;
+            developer.log(
+              '[AppDatabase] Backfilled orphaned subcategory $subcatId with category $categoryId',
+            );
+          }
+        }
+      }
+
+      if (backfilled > 0) {
+        developer.log(
+          '[AppDatabase] Backfilled $backfilled orphaned subcategories with category_id',
+        );
+      }
+
+      developer.log('[AppDatabase] Migration v9 completed');
+    } catch (e) {
+      developer.log('[AppDatabase] Error during v9 migration: $e');
+      rethrow;
+    }
   }
 
   /// Ensure schema is applied - used for defensive retry

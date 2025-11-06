@@ -540,10 +540,15 @@ class _AddLessonFormState extends State<_AddLessonForm> {
         };
 
         if (widget.lesson == null) {
+          final categoryId = sheikhProvider.currentSheikhCategoryId;
           await lectureProvider.addLecture(
             title: lessonData['title']!,
             description: lessonData['abstract'] ?? '',
             section: 'general',
+            categoryId: categoryId,
+            categoryName: categoryId,
+            subcategoryId: _selectedChapterId,
+            subcategoryName: _selectedChapterId,
           );
         } else {
           await lectureProvider.updateLecture(

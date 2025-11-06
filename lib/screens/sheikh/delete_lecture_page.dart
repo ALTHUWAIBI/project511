@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:new_project/provider/pro_login.dart';
 import 'package:new_project/provider/lecture_provider.dart';
+import 'package:new_project/provider/hierarchy_provider.dart';
 import 'package:new_project/widgets/sheikh_guard.dart';
 import 'package:new_project/utils/time.dart';
 
@@ -530,6 +531,14 @@ class _DeleteLecturePageState extends State<DeleteLecturePage> {
     );
 
     if (success) {
+      // Refresh home hierarchy after successful archive
+      final hierarchyProvider = Provider.of<HierarchyProvider>(
+        context,
+        listen: false,
+      );
+      hierarchyProvider.clearHomeHierarchyCache();
+      hierarchyProvider.loadHomeHierarchy(forceRefresh: true);
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('تم أرشفة المحاضرة بنجاح'),
@@ -582,6 +591,14 @@ class _DeleteLecturePageState extends State<DeleteLecturePage> {
     );
 
     if (success) {
+      // Refresh home hierarchy after successful delete
+      final hierarchyProvider = Provider.of<HierarchyProvider>(
+        context,
+        listen: false,
+      );
+      hierarchyProvider.clearHomeHierarchyCache();
+      hierarchyProvider.loadHomeHierarchy(forceRefresh: true);
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('تم حذف المحاضرة نهائياً'),

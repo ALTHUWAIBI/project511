@@ -110,6 +110,8 @@ class HierarchyProvider extends ChangeNotifier {
       );
 
       if (result['success']) {
+        // Clear home hierarchy cache after adding category
+        clearHomeHierarchyCache();
         // Reload categories
         await loadCategoriesBySection(section);
         _setLoading(false);
@@ -214,6 +216,8 @@ class HierarchyProvider extends ChangeNotifier {
       final result = await _hierarchyService.deleteCategory(categoryId);
 
       if (result['success']) {
+        // Clear home hierarchy cache after deleting category
+        clearHomeHierarchyCache();
         // Reload categories for the affected section
         if (sectionId.isNotEmpty) {
           await loadCategoriesBySection(sectionId);
@@ -295,6 +299,7 @@ class HierarchyProvider extends ChangeNotifier {
   Future<bool> updateSubcategory({
     required String subcategoryId,
     required String name,
+    String? categoryId,
     String? description,
     int? order,
     bool? isActive,
@@ -306,12 +311,15 @@ class HierarchyProvider extends ChangeNotifier {
       final result = await _hierarchyService.updateSubcategory(
         subcategoryId: subcategoryId,
         name: name,
+        categoryId: categoryId,
         description: description,
         order: order,
         isActive: isActive,
       );
 
       if (result['success']) {
+        // Clear home hierarchy cache after update
+        clearHomeHierarchyCache();
         _setLoading(false);
         return true;
       } else {
@@ -335,6 +343,8 @@ class HierarchyProvider extends ChangeNotifier {
       final result = await _hierarchyService.deleteSubcategory(subcategoryId);
 
       if (result['success']) {
+        // Clear home hierarchy cache after deleting subcategory
+        clearHomeHierarchyCache();
         _setLoading(false);
         return true;
       } else {
@@ -350,6 +360,125 @@ class HierarchyProvider extends ChangeNotifier {
   }
 
   // ==================== Lectures Management ====================
+
+  // Home hierarchy cache
+  Map<String, dynamic>? _homeHierarchy;
+  DateTime? _homeHierarchyLastUpdated;
+
+  /// Get home hierarchy (cached)
+  Map<String, dynamic>? get homeHierarchy => _homeHierarchy;
+
+  /// Get hierarchy for a specific section (no DB calls, just returns cached data)
+  Map<String, dynamic>? getSectionHierarchy(String section) {
+    if (_homeHierarchy == null) return null;
+    final sectionData = _homeHierarchy![section] as Map<String, dynamic>?;
+    return sectionData ??
+        <String, dynamic>{
+          'categories': <List<dynamic>>[],
+          'uncategorizedLectures': <List<dynamic>>[],
+        };
+  }
+
+  /// Load full home hierarchy: Section → Category → Subcategory → Lectures
+  /// Single source of truth for Home screen
+  Future<void> loadHomeHierarchy({bool forceRefresh = false}) async {
+    // Return cached data if fresh (within 5 seconds) and not forcing refresh
+    if (!forceRefresh &&
+        _homeHierarchy != null &&
+        _homeHierarchyLastUpdated != null) {
+      final age = DateTime.now().difference(_homeHierarchyLastUpdated!);
+      if (age.inSeconds < 5) {
+        developer.log(
+          '[HierarchyProvider] Using cached home hierarchy (age: ${age.inSeconds}s)',
+        );
+        return;
+      }
+    }
+
+    developer.log(
+      '[HierarchyProvider] Loading home hierarchy (forceRefresh=$forceRefresh)',
+    );
+    _setLoading(true);
+    _setError(null);
+    notifyListeners(); // Notify before fetch
+
+    try {
+      final startTime = DateTime.now();
+      _homeHierarchy = await _hierarchyService.getHomeHierarchy();
+      _homeHierarchyLastUpdated = DateTime.now();
+      final loadTime = DateTime.now().difference(startTime);
+
+      developer.log(
+        '[HierarchyProvider] Home hierarchy loaded in ${loadTime.inMilliseconds}ms',
+      );
+
+      // DIAGNOSTIC: Log hierarchy structure size and keys
+      developer.log(
+        '[HierarchyProvider] Hierarchy structure keys: ${_homeHierarchy?.keys.toList()}',
+      );
+      developer.log(
+        '[HierarchyProvider] Hierarchy structure size: ${_homeHierarchy?.length ?? 0} sections',
+      );
+
+      // Log counts with detailed breakdown
+      final sections = ['fiqh', 'hadith', 'tafsir', 'seerah'];
+      for (final section in sections) {
+        final sectionData = _homeHierarchy?[section] as Map<String, dynamic>?;
+        if (sectionData != null) {
+          final categories = sectionData['categories'] as List? ?? [];
+          final uncategorizedLectures =
+              sectionData['uncategorizedLectures'] as List? ?? [];
+          int totalLectures = uncategorizedLectures.length;
+          int totalSubcategories = 0;
+
+          // DIAGNOSTIC: Log per-category breakdown
+          for (final catData in categories) {
+            final cat = catData['category'] as Map<String, dynamic>?;
+            final catName = cat?['name']?.toString() ?? 'unknown';
+            final subcategories = catData['subcategories'] as List? ?? [];
+            totalSubcategories += subcategories.length;
+            int catLectureCount = 0;
+            for (final subcatData in subcategories) {
+              final subcat = subcatData['subcategory'] as Map<String, dynamic>?;
+              final subcatName = subcat?['name']?.toString() ?? 'unknown';
+              final lectures = subcatData['lectures'] as List? ?? [];
+              catLectureCount += lectures.length;
+              developer.log(
+                '[HierarchyProvider] Section $section → Category $catName → Subcategory $subcatName: ${lectures.length} lectures',
+              );
+            }
+            developer.log(
+              '[HierarchyProvider] Section $section → Category $catName: ${subcategories.length} subcategories, $catLectureCount lectures',
+            );
+          }
+
+          developer.log(
+            '[HierarchyProvider] Section $section: ${categories.length} categories, $totalSubcategories subcategories, $totalLectures lectures (${uncategorizedLectures.length} uncategorized)',
+          );
+        } else {
+          developer.log(
+            '[HierarchyProvider] Section $section: NO DATA (sectionData is null)',
+          );
+        }
+      }
+
+      _setLoading(false);
+    } catch (e) {
+      developer.log('[HierarchyProvider] Error loading home hierarchy: $e');
+      _setLoading(false);
+      _setError('حدث خطأ في تحميل البيانات: $e');
+    }
+  }
+
+  /// Clear home hierarchy cache (call after CRUD operations)
+  void clearHomeHierarchyCache() {
+    developer.log(
+      '[HierarchyProvider] clearHomeHierarchyCache called - invalidating cache',
+    );
+    _homeHierarchy = null;
+    _homeHierarchyLastUpdated = null;
+    notifyListeners();
+  }
 
   /// Load lectures with hierarchy filtering
   Future<void> loadLecturesWithHierarchy({

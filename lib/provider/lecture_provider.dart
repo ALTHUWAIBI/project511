@@ -161,23 +161,35 @@ class LectureProvider extends ChangeNotifier {
     required String description,
     String? videoPath,
     required String section,
+    String? categoryId,
+    String? categoryName,
     String? subcategoryId,
+    String? subcategoryName,
   }) async {
     _setLoading(true);
     _setError(null);
 
     try {
+      // Normalize section to canonical key
+      final normalizedSection = _normalizeSectionKey(section);
+      developer.log(
+        '[LectureProvider] Adding lecture: section=$normalizedSection, categoryId=$categoryId, subcategoryId=$subcategoryId',
+      );
+
       final result = await _repository.addLecture(
         title: title,
         description: description,
         videoPath: videoPath,
-        section: section,
+        section: normalizedSection,
+        categoryId: categoryId,
+        categoryName: categoryName,
         subcategoryId: subcategoryId,
+        subcategoryName: subcategoryName,
       );
 
       if (result['success']) {
         // Reload the specific section and all lectures
-        await loadLecturesBySection(section);
+        await loadLecturesBySection(normalizedSection);
         await loadAllLectures();
         _setLoading(false);
         return true;
@@ -385,6 +397,8 @@ class LectureProvider extends ChangeNotifier {
         await loadAllLectures();
         // Reload the section's lectures
         await loadLecturesBySection(normalizedSection);
+        // Clear home hierarchy cache to force refresh
+        // Note: HierarchyProvider will be notified separately if needed
         _setLoading(false);
         return true;
       } else {

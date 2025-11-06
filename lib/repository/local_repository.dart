@@ -415,6 +415,35 @@ class LocalRepository {
     }
   }
 
+  /// Get subcategories by category (only non-deleted)
+  Future<List<Map<String, dynamic>>> getSubcategoriesByCategory(
+    String categoryId,
+  ) async {
+    try {
+      return await _withRetry((db) async {
+        final results = await db.query(
+          'subcategories',
+          where: 'category_id = ?',
+          whereArgs: [categoryId],
+          orderBy: 'created_at ASC',
+        );
+
+        developer.log(
+          '[LocalRepository] getSubcategoriesByCategory: categoryId=$categoryId, found ${results.length} subcategories',
+          name: 'getSubcategoriesByCategory',
+        );
+
+        return results;
+      }, 'getSubcategoriesByCategory');
+    } catch (e) {
+      developer.log(
+        'Get subcategories by category error: $e',
+        name: 'LocalRepository',
+      );
+      return [];
+    }
+  }
+
   /// Get a single subcategory
   Future<Map<String, dynamic>?> getSubcategory(String id) async {
     try {
@@ -437,22 +466,63 @@ class LocalRepository {
   Future<Map<String, dynamic>> addSubcategory({
     required String name,
     required String section,
+    String? categoryId,
     String? description,
     String? iconName,
   }) async {
     try {
       return await _withRetry((db) async {
+        // Validate category_id is provided
+        if (categoryId == null || categoryId.isEmpty) {
+          developer.log(
+            '[LocalRepository] ERROR: addSubcategory called without categoryId - this will create an orphaned subcategory',
+            name: 'addSubcategory',
+          );
+          return {
+            'success': false,
+            'message': 'يجب تحديد الفئة الرئيسية للفئة الفرعية',
+          };
+        }
+
+        // Verify category exists
+        final categoryCheck = await db.query(
+          'categories',
+          where: 'id = ? AND isDeleted = ?',
+          whereArgs: [categoryId, 0],
+          limit: 1,
+        );
+
+        if (categoryCheck.isEmpty) {
+          developer.log(
+            '[LocalRepository] ERROR: Category not found: $categoryId',
+            name: 'addSubcategory',
+          );
+          return {'success': false, 'message': 'الفئة الرئيسية غير موجودة'};
+        }
+
         final subcatId = generateUUID();
         final now = nowMillis();
+
+        // Log category_id being persisted
+        developer.log(
+          '[LocalRepository] Adding subcategory: name=$name, section=$section, categoryId=$categoryId',
+          name: 'addSubcategory',
+        );
 
         await db.insert('subcategories', {
           'id': subcatId,
           'name': name,
           'section': section,
+          'category_id': categoryId,
           'description': description,
           'icon_name': iconName,
           'created_at': now,
         });
+
+        developer.log(
+          '[LocalRepository] Added subcategory: id=$subcatId, categoryId=$categoryId',
+          name: 'addSubcategory',
+        );
 
         return {
           'success': true,
@@ -473,6 +543,7 @@ class LocalRepository {
   Future<Map<String, dynamic>> updateSubcategory({
     required String id,
     required String name,
+    String? categoryId,
     String? description,
     String? iconName,
   }) async {
@@ -480,6 +551,13 @@ class LocalRepository {
       return await _withRetry((db) async {
         final Map<String, dynamic> updateData = {'name': name};
 
+        if (categoryId != null) {
+          updateData['category_id'] = categoryId;
+          developer.log(
+            '[LocalRepository] Updating subcategory: id=$id, categoryId=$categoryId',
+            name: 'updateSubcategory',
+          );
+        }
         if (description != null) updateData['description'] = description;
         if (iconName != null) updateData['icon_name'] = iconName;
 
@@ -526,7 +604,10 @@ class LocalRepository {
     required String description,
     String? videoPath,
     required String section,
+    String? categoryId,
+    String? categoryName,
     String? subcategoryId,
+    String? subcategoryName,
   }) async {
     try {
       return await _withRetry((db) async {
@@ -536,9 +617,38 @@ class LocalRepository {
         // Normalize section to canonical key
         final normalizedSection = _normalizeSectionKey(section);
 
+        // If subcategoryId is provided but categoryId is not, try to get it from subcategory
+        String? resolvedCategoryId = categoryId;
+        String? resolvedCategoryName = categoryName;
+        if (subcategoryId != null &&
+            subcategoryId.isNotEmpty &&
+            (categoryId == null || categoryId.isEmpty)) {
+          final subcat = await db.query(
+            'subcategories',
+            where: 'id = ?',
+            whereArgs: [subcategoryId],
+            limit: 1,
+          );
+          if (subcat.isNotEmpty) {
+            resolvedCategoryId = subcat.first['category_id']?.toString();
+            if (resolvedCategoryId != null && resolvedCategoryId.isNotEmpty) {
+              // Get category name
+              final cat = await db.query(
+                'categories',
+                where: 'id = ? AND isDeleted = ?',
+                whereArgs: [resolvedCategoryId, 0],
+                limit: 1,
+              );
+              if (cat.isNotEmpty) {
+                resolvedCategoryName = cat.first['name']?.toString();
+              }
+            }
+          }
+        }
+
         // Log the values being persisted for diagnostics
         developer.log(
-          '[LocalRepository] Adding lecture: section=$normalizedSection (original=$section), isPublished=1, status=published',
+          '[LocalRepository] Adding lecture: section=$normalizedSection (original=$section), categoryId=$resolvedCategoryId, subcategoryId=$subcategoryId, isPublished=1, status=published',
           name: 'addLecture',
         );
 
@@ -548,7 +658,10 @@ class LocalRepository {
           'description': description ?? '',
           'video_path': videoPath ?? '',
           'section': normalizedSection,
+          'categoryId': resolvedCategoryId ?? '',
+          'categoryName': resolvedCategoryName ?? '',
           'subcategory_id': subcategoryId ?? '',
+          'subcategoryName': subcategoryName ?? '',
           'status': 'published',
           'isPublished': 1,
           'isDeleted': 0,
@@ -558,7 +671,7 @@ class LocalRepository {
 
         // Log for diagnostics
         developer.log(
-          '[LocalRepository] Added lecture: id=$lectureId, section=$normalizedSection, isPublished=1, status=published, isDeleted=0',
+          '[LocalRepository] Added lecture: id=$lectureId, section=$normalizedSection, categoryId=$resolvedCategoryId, subcategoryId=$subcategoryId, isPublished=1, status=published, isDeleted=0',
           name: 'addLecture',
         );
 
@@ -642,6 +755,282 @@ class LocalRepository {
     } catch (e) {
       developer.log(
         'Get lectures by section error: $e',
+        name: 'LocalRepository',
+      );
+      return [];
+    }
+  }
+
+  /// Get full home hierarchy: Section → Category → Subcategory → Lectures
+  /// Returns structure: {section: {categories: [{category: {...}, subcategories: [{subcategory: {...}, lectures: [...]}]}], uncategorizedLectures: [...]}}
+  /// Only includes published, non-deleted lectures
+  Future<Map<String, dynamic>> getHomeHierarchy() async {
+    try {
+      return await _withRetry((db) async {
+        final startTime = DateTime.now().millisecondsSinceEpoch;
+        final hierarchy = <String, dynamic>{};
+        final sections = ['fiqh', 'hadith', 'tafsir', 'seerah'];
+
+        for (final section in sections) {
+          // Get categories for this section
+          final categories = await db.query(
+            'categories',
+            where: 'section_id = ? AND isDeleted = ?',
+            whereArgs: [section, 0],
+            orderBy: 'sortOrder ASC, id ASC',
+          );
+
+          // Get subcategories for this section (will be grouped by category_id)
+          final subcategories = await db.query(
+            'subcategories',
+            where: 'section = ?',
+            whereArgs: [section],
+            orderBy: 'created_at ASC',
+          );
+
+          // Get published, non-deleted lectures for this section
+          final lectures = await db.query(
+            'lectures',
+            where: 'section = ? AND isDeleted = ? AND isPublished = ?',
+            whereArgs: [section, 0, 1],
+            orderBy: 'startTime DESC, createdAt DESC',
+          );
+
+          // DIAGNOSTIC: Log raw SQL query results
+          developer.log(
+            '[LocalRepository] getHomeHierarchy - Section $section: Found ${lectures.length} lectures, ${categories.length} categories, ${subcategories.length} subcategories',
+            name: 'getHomeHierarchy',
+          );
+
+          // DIAGNOSTIC: Log sample lecture data to verify fields
+          if (lectures.isNotEmpty) {
+            final sampleLecture = lectures.first;
+            developer.log(
+              '[LocalRepository] Sample lecture: id=${sampleLecture['id']}, title=${sampleLecture['title']}, section=${sampleLecture['section']}, categoryId=${sampleLecture['categoryId']}, subcategory_id=${sampleLecture['subcategory_id']}, isPublished=${sampleLecture['isPublished']}, isDeleted=${sampleLecture['isDeleted']}',
+              name: 'getHomeHierarchy',
+            );
+          }
+
+          // Build category structure with subcategories and lectures
+          final categoryList = <Map<String, dynamic>>[];
+          final subcategoryMap = <String, List<Map<String, dynamic>>>{};
+
+          // Group subcategories by category (if categoryId exists in lecture)
+          for (final subcat in subcategories) {
+            final subcatId = subcat['id'] as String?;
+            if (subcatId == null) continue;
+
+            // Find lectures for this subcategory
+            final subcatLectures = lectures.where((lecture) {
+              final lectureSubcatId = lecture['subcategory_id']?.toString();
+              return lectureSubcatId == subcatId;
+            }).toList();
+
+            // Only include subcategory if it has lectures or if we want to show empty ones
+            if (subcatLectures.isNotEmpty) {
+              subcategoryMap[subcatId] = subcatLectures;
+            }
+          }
+
+          // Build category structure using category_id from subcategories
+          for (final category in categories) {
+            final categoryId = category['id'] as String?;
+            if (categoryId == null) continue;
+
+            // Find subcategories that belong to this category (using category_id column)
+            final categorySubcategories = <Map<String, dynamic>>[];
+            final subcatsForCategory = subcategories.where((subcat) {
+              final subcatCategoryId = subcat['category_id']?.toString();
+              return subcatCategoryId == categoryId;
+            }).toList();
+
+            for (final subcat in subcatsForCategory) {
+              final subcatId = subcat['id'] as String?;
+              if (subcatId == null) continue;
+
+              // Find lectures for this subcategory
+              // Match by subcategory_id only - the subcategory already belongs to this category
+              final subcatLectures = lectures.where((l) {
+                final lectureSubcatId = l['subcategory_id']?.toString();
+                return lectureSubcatId == subcatId;
+              }).toList();
+
+              // Null-safe mapping
+              final mappedLectures = subcatLectures.map((l) {
+                final lecture = Map<String, dynamic>.from(l);
+                lecture['title'] = lecture['title']?.toString() ?? '';
+                lecture['description'] =
+                    lecture['description']?.toString() ?? '';
+                lecture['video_path'] = lecture['video_path']?.toString() ?? '';
+                lecture['section'] =
+                    lecture['section']?.toString() ?? 'unknown';
+                lecture['categoryName'] =
+                    lecture['categoryName']?.toString() ?? '';
+                lecture['subcategoryName'] =
+                    lecture['subcategoryName']?.toString() ?? '';
+                lecture['sheikhName'] = lecture['sheikhName']?.toString() ?? '';
+                lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
+                return lecture;
+              }).toList();
+
+              categorySubcategories.add({
+                'subcategory': subcat,
+                'lectures': mappedLectures,
+              });
+            }
+
+            // Add category - show even if empty (for proper UI structure)
+            // Always include category if it exists, even with no subcategories/lectures
+            categoryList.add({
+              'category': category,
+              'subcategories': categorySubcategories,
+            });
+          }
+
+          // Find uncategorized lectures (no categoryId or subcategory_id)
+          final uncategorizedLectures = lectures
+              .where((lecture) {
+                final categoryId = lecture['categoryId']?.toString();
+                final subcatId = lecture['subcategory_id']?.toString();
+                return (categoryId == null || categoryId.isEmpty) &&
+                    (subcatId == null || subcatId.isEmpty);
+              })
+              .map((l) {
+                final lecture = Map<String, dynamic>.from(l);
+                lecture['title'] = lecture['title']?.toString() ?? '';
+                lecture['description'] =
+                    lecture['description']?.toString() ?? '';
+                lecture['video_path'] = lecture['video_path']?.toString() ?? '';
+                lecture['section'] =
+                    lecture['section']?.toString() ?? 'unknown';
+                lecture['categoryName'] =
+                    lecture['categoryName']?.toString() ?? '';
+                lecture['subcategoryName'] =
+                    lecture['subcategoryName']?.toString() ?? '';
+                lecture['sheikhName'] = lecture['sheikhName']?.toString() ?? '';
+                lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
+                return lecture;
+              })
+              .toList();
+
+          // Build section data with proper structure for Home
+          // Structure: {categories: [{category: {...}, subcategories: [{subcategory: {...}, lectures: [...]}]}], uncategorizedLectures: [...]}
+          // NOTE: Do NOT include 'subcategories' at section level - UI must read via categories → subcategories
+          final sectionData = <String, dynamic>{
+            'categories': categoryList,
+            'uncategorizedLectures': uncategorizedLectures,
+          };
+
+          hierarchy[section] = sectionData;
+        }
+
+        final loadTime = DateTime.now().millisecondsSinceEpoch - startTime;
+        developer.log(
+          '[LocalRepository] getHomeHierarchy: loaded in ${loadTime}ms',
+          name: 'getHomeHierarchy',
+        );
+
+        // Log counts per section with detailed breakdown
+        for (final section in sections) {
+          final sectionData = hierarchy[section] as Map<String, dynamic>?;
+          if (sectionData != null) {
+            final categories = sectionData['categories'] as List? ?? [];
+            final uncategorizedLectures =
+                sectionData['uncategorizedLectures'] as List? ?? [];
+            int totalLectures = uncategorizedLectures.length;
+            int totalSubcategories = 0;
+            for (final catData in categories) {
+              final subcategories = catData['subcategories'] as List? ?? [];
+              totalSubcategories += subcategories.length;
+              for (final subcatData in subcategories) {
+                final lectures = subcatData['lectures'] as List? ?? [];
+                totalLectures += lectures.length;
+              }
+            }
+
+            // Check for orphaned subcategories (missing category_id)
+            final allSubcats = await db.query(
+              'subcategories',
+              where: 'section = ?',
+              whereArgs: [section],
+            );
+            final orphanedSubcats = allSubcats.where((subcat) {
+              final categoryId = subcat['category_id']?.toString();
+              return categoryId == null || categoryId.isEmpty;
+            }).toList();
+
+            if (orphanedSubcats.isNotEmpty) {
+              developer.log(
+                '[LocalRepository] WARNING: Found ${orphanedSubcats.length} orphaned subcategories in section $section (missing category_id)',
+                name: 'getHomeHierarchy',
+              );
+            }
+
+            // DIAGNOSTIC: Log detailed breakdown per category
+            for (final catData in categories) {
+              final cat = catData['category'] as Map<String, dynamic>?;
+              if (cat != null) {
+                final catId = cat['id']?.toString() ?? 'unknown';
+                final catName = cat['name']?.toString() ?? 'unknown';
+                final subcats = catData['subcategories'] as List? ?? [];
+                int catLectureCount = 0;
+                for (final subcatData in subcats) {
+                  final subcatLectures = subcatData['lectures'] as List? ?? [];
+                  catLectureCount += subcatLectures.length;
+                }
+                developer.log(
+                  '[LocalRepository] Category $catName (id=$catId): ${subcats.length} subcategories, $catLectureCount lectures',
+                  name: 'getHomeHierarchy',
+                );
+              }
+            }
+
+            developer.log(
+              '[LocalRepository] Section $section: ${categories.length} categories, $totalSubcategories subcategories, $totalLectures lectures${orphanedSubcats.isNotEmpty ? ", ${orphanedSubcats.length} orphaned" : ""}',
+              name: 'getHomeHierarchy',
+            );
+          }
+        }
+
+        return hierarchy;
+      }, 'getHomeHierarchy');
+    } catch (e) {
+      developer.log('Get home hierarchy error: $e', name: 'LocalRepository');
+      return {};
+    }
+  }
+
+  /// Get lectures by category (only published and not deleted)
+  Future<List<Map<String, dynamic>>> getLecturesByCategory(
+    String categoryId,
+  ) async {
+    try {
+      return await _withRetry((db) async {
+        final results = await db.query(
+          'lectures',
+          where: 'categoryId = ? AND isDeleted = ? AND isPublished = ?',
+          whereArgs: [categoryId, 0, 1],
+          orderBy: 'createdAt DESC',
+        );
+
+        return results.map((row) {
+          final lecture = Map<String, dynamic>.from(row);
+          // Ensure all string fields have defaults
+          lecture['title'] = lecture['title']?.toString() ?? '';
+          lecture['description'] = lecture['description']?.toString() ?? '';
+          lecture['video_path'] = lecture['video_path']?.toString() ?? '';
+          lecture['section'] = lecture['section']?.toString() ?? 'unknown';
+          lecture['categoryName'] = lecture['categoryName']?.toString() ?? '';
+          lecture['subcategoryName'] =
+              lecture['subcategoryName']?.toString() ?? '';
+          lecture['sheikhName'] = lecture['sheikhName']?.toString() ?? '';
+          lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
+          return lecture;
+        }).toList();
+      }, 'getLecturesByCategory');
+    } catch (e) {
+      developer.log(
+        'Get lectures by category error: $e',
         name: 'LocalRepository',
       );
       return [];
@@ -1371,6 +1760,8 @@ class LocalRepository {
   }
 
   /// Initialize default subcategories
+  /// NOTE: This method is deprecated - subcategories should always have category_id
+  /// This method will not create orphaned subcategories
   Future<void> initializeDefaultSubcategories() async {
     try {
       await _withRetry((db) async {
@@ -1378,36 +1769,23 @@ class LocalRepository {
         final existing = await db.query('subcategories', limit: 1);
         if (existing.isNotEmpty) {
           developer.log(
-            'Subcategories already initialized',
-            name: 'LocalRepository',
+            '[LocalRepository] Subcategories already exist - skipping initialization',
+            name: 'initializeDefaultSubcategories',
           );
           return;
         }
 
-        final now = nowMillis();
-        final sections = ['الفقه', 'الحديث', 'التفسير', 'السيرة'];
-
-        for (final section in sections) {
-          final subcatId = generateUUID();
-          await db.insert('subcategories', {
-            'id': subcatId,
-            'name': section,
-            'section': section,
-            'description': null,
-            'icon_name': null,
-            'created_at': now,
-          });
-        }
-
         developer.log(
-          'Default subcategories initialized',
-          name: 'LocalRepository',
+          '[LocalRepository] Skipping default subcategory initialization - subcategories must be created with category_id',
+          name: 'initializeDefaultSubcategories',
         );
+        // Do not create orphaned subcategories without category_id
+        // Subcategories should be created through the proper UI flow with category selection
       }, 'initializeDefaultSubcategories');
     } catch (e) {
       developer.log(
-        'Initialize subcategories error: $e',
-        name: 'LocalRepository',
+        '[LocalRepository] Initialize subcategories error: $e',
+        name: 'initializeDefaultSubcategories',
       );
     }
   }

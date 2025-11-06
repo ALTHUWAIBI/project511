@@ -96,22 +96,26 @@ class FirebaseService {
   Future<Map<String, dynamic>> addSubcategory({
     required String name,
     required String section,
+    String? categoryId,
     String? description,
     String? iconName,
   }) => _repo.addSubcategory(
     name: name,
     section: section,
+    categoryId: categoryId,
     description: description,
     iconName: iconName,
   );
   Future<Map<String, dynamic>> updateSubcategory({
     required String id,
     required String name,
+    String? categoryId,
     String? description,
     String? iconName,
   }) => _repo.updateSubcategory(
     id: id,
     name: name,
+    categoryId: categoryId,
     description: description,
     iconName: iconName,
   );
@@ -124,13 +128,19 @@ class FirebaseService {
     required String description,
     String? videoPath,
     required String section,
+    String? categoryId,
+    String? categoryName,
     String? subcategoryId,
+    String? subcategoryName,
   }) => _repo.addLecture(
     title: title,
     description: description,
     videoPath: videoPath,
     section: section,
+    categoryId: categoryId,
+    categoryName: categoryName,
     subcategoryId: subcategoryId,
+    subcategoryName: subcategoryName,
   );
   Future<List<Map<String, dynamic>>> getAllLectures() => _repo.getAllLectures();
   Future<List<Map<String, dynamic>>> getLecturesBySection(String section) =>

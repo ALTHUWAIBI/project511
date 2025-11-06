@@ -242,7 +242,10 @@ class _SheikhUploadScreenState extends State<SheikhUploadScreen> {
             description: lectureData['description'] ?? '',
             videoPath: _mediaUrl,
             section: lectureData['section'] ?? '',
+            categoryId: categoryId,
+            categoryName: lectureData['categoryName'],
             subcategoryId: lectureData['subcategoryId'],
+            subcategoryName: lectureData['subcategoryName'],
           );
         }
       }

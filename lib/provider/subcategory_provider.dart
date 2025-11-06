@@ -79,6 +79,7 @@ class SubcategoryProvider extends ChangeNotifier {
   Future<bool> addSubcategory({
     required String name,
     required String section,
+    required String categoryId,
     String? description,
     String? iconName,
   }) async {
@@ -89,6 +90,7 @@ class SubcategoryProvider extends ChangeNotifier {
       final result = await _repository.addSubcategory(
         name: name,
         section: section,
+        categoryId: categoryId,
         description: description,
         iconName: iconName,
       );

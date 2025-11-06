@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:new_project/offline/firestore_shims.dart';
 import 'package:new_project/provider/lecture_provider.dart';
+import 'package:new_project/provider/hierarchy_provider.dart';
 import 'package:new_project/provider/prayer_times_provider.dart';
 import 'package:new_project/provider/location_provider.dart';
 import 'package:new_project/provider/pro_login.dart';
@@ -12,6 +13,7 @@ import 'tafsir_section.dart';
 import 'seerah_section.dart';
 import 'notifications_page.dart';
 import 'settings_page.dart';
+import 'section_categories_page.dart';
 import '../widgets/mosque_map_preview.dart';
 import '../widgets/app_drawer.dart';
 import '../utils/page_transition.dart';
@@ -91,11 +93,19 @@ class _HomePageState extends State<HomePage> {
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () async {
-            // Refresh all lectures
-            await Provider.of<LectureProvider>(
+            // Refresh all lectures and hierarchy
+            final lectureProvider = Provider.of<LectureProvider>(
               context,
               listen: false,
-            ).loadAllLectures();
+            );
+            final hierarchyProvider = Provider.of<HierarchyProvider>(
+              context,
+              listen: false,
+            );
+            await Future.wait([
+              lectureProvider.loadAllSections(),
+              hierarchyProvider.loadHomeHierarchy(forceRefresh: true),
+            ]);
           },
           child: SingleChildScrollView(
             child: Column(
@@ -122,23 +132,27 @@ class _HomePageState extends State<HomePage> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      CategoryIcon(
+                      _buildSectionChip(
                         title: 'الحديث',
+                        sectionKey: 'hadith',
                         icon: Icons.auto_stories,
                         isDarkMode: isDarkMode,
                       ),
-                      CategoryIcon(
+                      _buildSectionChip(
                         title: 'التفسير',
+                        sectionKey: 'tafsir',
                         icon: Icons.menu_book,
                         isDarkMode: isDarkMode,
                       ),
-                      CategoryIcon(
+                      _buildSectionChip(
                         title: 'السيرة',
+                        sectionKey: 'seerah',
                         icon: Icons.book,
                         isDarkMode: isDarkMode,
                       ),
-                      CategoryIcon(
+                      _buildSectionChip(
                         title: 'الفقه',
+                        sectionKey: 'fiqh',
                         icon: Icons.library_books,
                         isDarkMode: isDarkMode,
                       ),
@@ -243,61 +257,6 @@ class _HomePageState extends State<HomePage> {
                       const SizedBox(height: 8),
                       MosqueMapPreview(toggleTheme: widget.toggleTheme),
                     ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                // Hierarchical Content: Category → Subcategory → Lectures
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  child: Consumer<LectureProvider>(
-                    builder: (context, lectureProvider, child) {
-                      if (lectureProvider.isLoading) {
-                        return const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(24.0),
-                            child: CircularProgressIndicator(),
-                          ),
-                        );
-                      }
-
-                      // Check if there are any lectures to display
-                      final lectures = lectureProvider.allLectures;
-                      if (lectures.isEmpty) {
-                        return Card(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(24.0),
-                            child: Center(
-                              child: Column(
-                                children: [
-                                  Icon(
-                                    Icons.library_books,
-                                    size: 48,
-                                    color: Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'لا توجد محاضرات بعد',
-                                    style: TextStyle(color: Colors.grey[600]),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      }
-
-                      // Build a simple hierarchy from lectures
-                      final hierarchy = <String, dynamic>{
-                        'fiqh': {'lectures': lectureProvider.fiqhLectures},
-                        'hadith': {'lectures': lectureProvider.hadithLectures},
-                        'tafsir': {'lectures': lectureProvider.tafsirLectures},
-                        'seerah': {'lectures': lectureProvider.seerahLectures},
-                      };
-                      return _buildHierarchicalContent(hierarchy);
-                    },
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -928,244 +887,53 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Build hierarchical content: Category → Subcategory → Lectures
-  Widget _buildHierarchicalContent(Map<String, dynamic> hierarchy) {
-    final sections = ['fiqh', 'hadith', 'tafsir', 'seerah'];
-    final sectionDisplayNames = {
-      'fiqh': 'الفقه',
-      'hadith': 'الحديث',
-      'tafsir': 'التفسير',
-      'seerah': 'السيرة',
-    };
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'المحاضرات حسب الفئات',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: Colors.green,
+  /// Build section chip (navigates to SectionCategoriesPage)
+  Widget _buildSectionChip({
+    required String title,
+    required String sectionKey,
+    required IconData icon,
+    required bool isDarkMode,
+  }) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => SectionCategoriesPage(
+              sectionKey: sectionKey,
+              sectionNameAr: title,
+              isDarkMode: isDarkMode,
+              toggleTheme: widget.toggleTheme,
+            ),
           ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.withOpacity(0.3), width: 1),
         ),
-        const SizedBox(height: 16),
-        ...sections.map((section) {
-          final sectionData = hierarchy[section] as Map<String, dynamic>?;
-          if (sectionData == null) return const SizedBox.shrink();
-
-          final subcategories =
-              sectionData['subcategories'] as List<dynamic>? ?? [];
-          final uncategorizedLectures =
-              sectionData['uncategorizedLectures'] as List<dynamic>? ?? [];
-
-          // Skip section if it has no subcategories and no uncategorized lectures
-          if (subcategories.isEmpty && uncategorizedLectures.isEmpty) {
-            return const SizedBox.shrink();
-          }
-
-          return Card(
-            margin: const EdgeInsets.only(bottom: 16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: ExpansionTile(
-              leading: CircleAvatar(
-                backgroundColor: Colors.green,
-                child: Icon(_getSectionIcon(section), color: Colors.white),
-              ),
-              title: Text(
-                sectionDisplayNames[section] ?? section,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              subtitle: Text(
-                '${subcategories.length} فئة فرعية',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-              ),
-              children: [
-                // Subcategories with lectures
-                ...subcategories.map((subcatData) {
-                  final subcat =
-                      subcatData['subcategory'] as Map<String, dynamic>?;
-                  final lectures =
-                      subcatData['lectures'] as List<dynamic>? ?? [];
-
-                  if (subcat == null) return const SizedBox.shrink();
-
-                  final subcatName = subcat['name']?.toString() ?? 'غير محدد';
-
-                  // Hide subcategory if it has zero lectures (optional - can show empty state)
-                  if (lectures.isEmpty) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16.0,
-                        vertical: 8.0,
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.folder_outlined,
-                            size: 20,
-                            color: Colors.grey[400],
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            subcatName,
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '(لا توجد محاضرات)',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[500],
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  return ExpansionTile(
-                    leading: Icon(Icons.folder, size: 20, color: Colors.blue),
-                    title: Text(
-                      subcatName,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    subtitle: Text(
-                      '${lectures.length} محاضرة',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                    ),
-                    children: [
-                      ...lectures.map((lecture) {
-                        return _buildLectureCardFromHierarchy(lecture);
-                      }).toList(),
-                    ],
-                  );
-                }).toList(),
-
-                // Uncategorized lectures
-                if (uncategorizedLectures.isNotEmpty) ...[
-                  ExpansionTile(
-                    leading: Icon(
-                      Icons.folder_outlined,
-                      size: 20,
-                      color: Colors.orange,
-                    ),
-                    title: const Text(
-                      'غير مصنف',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    subtitle: Text(
-                      '${uncategorizedLectures.length} محاضرة',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                    ),
-                    children: [
-                      ...uncategorizedLectures.map((lecture) {
-                        return _buildLectureCardFromHierarchy(lecture);
-                      }).toList(),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          );
-        }).toList(),
-      ],
-    );
-  }
-
-  /// Get icon for section
-  IconData _getSectionIcon(String section) {
-    switch (section.toLowerCase()) {
-      case 'fiqh':
-        return Icons.library_books;
-      case 'hadith':
-        return Icons.auto_stories;
-      case 'tafsir':
-        return Icons.menu_book;
-      case 'seerah':
-        return Icons.book;
-      default:
-        return Icons.menu_book_outlined;
-    }
-  }
-
-  /// Build lecture card from hierarchy data (null-safe)
-  Widget _buildLectureCardFromHierarchy(dynamic lecture) {
-    final lectureMap = lecture as Map<String, dynamic>?;
-    if (lectureMap == null) return const SizedBox.shrink();
-
-    // Null-safe field extraction
-    final title = lectureMap['title']?.toString() ?? 'بدون عنوان';
-    final description = lectureMap['description']?.toString() ?? '';
-    final videoPath = lectureMap['video_path']?.toString();
-    final section = lectureMap['section']?.toString() ?? 'unknown';
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.green,
-          child: Icon(_getSectionIcon(section), color: Colors.white, size: 20),
-        ),
-        title: Text(
-          title,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            if (description.isNotEmpty) ...[
-              Text(
-                description,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: Colors.white,
+              child: Icon(icon, color: Colors.black),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.normal,
+                color: Colors.black87,
               ),
-              const SizedBox(height: 4),
-            ],
-            Row(
-              children: [
-                Text(
-                  'القسم: ${_getSectionDisplayName(section)}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.green[700],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                if (videoPath != null && videoPath.trim().isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Icon(Icons.video_library, size: 16, color: Colors.red[700]),
-                ],
-              ],
             ),
           ],
         ),
-        trailing: IconButton(
-          icon: const Icon(Icons.arrow_forward_ios, size: 16),
-          onPressed: () {
-            _showLectureDetails(context, lectureMap);
-          },
-        ),
-        onTap: () {
-          _showLectureDetails(context, lectureMap);
-        },
       ),
     );
   }
