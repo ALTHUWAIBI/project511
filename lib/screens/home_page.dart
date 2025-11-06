@@ -5,6 +5,7 @@ import 'package:new_project/provider/lecture_provider.dart';
 import 'package:new_project/provider/prayer_times_provider.dart';
 import 'package:new_project/provider/location_provider.dart';
 import 'package:new_project/provider/pro_login.dart';
+import 'package:new_project/utils/time.dart';
 import 'fiqh_section.dart';
 import 'hadith_section.dart';
 import 'tafsir_section.dart';
@@ -31,10 +32,8 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    // Load all lectures when home page opens
+    // Load location and calculate prayer times
     Future.microtask(() {
-      Provider.of<LectureProvider>(context, listen: false).loadAllSections();
-      // Load location and calculate prayer times
       _loadPrayerTimes();
     });
   }
@@ -90,331 +89,420 @@ class _HomePageState extends State<HomePage> {
       ),
       drawer: AppDrawer(toggleTheme: widget.toggleTheme),
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              const SizedBox(height: 20),
-              Center(
-                child: Column(
-                  children: [
-                    Image.asset('assets/logo.png', width: 80, height: 80),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'محاضرات',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
+        child: RefreshIndicator(
+          onRefresh: () async {
+            // Refresh all lectures
+            await Provider.of<LectureProvider>(
+              context,
+              listen: false,
+            ).loadAllLectures();
+          },
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                const SizedBox(height: 20),
+                Center(
+                  child: Column(
+                    children: [
+                      Image.asset('assets/logo.png', width: 80, height: 80),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'محاضرات',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 24),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    CategoryIcon(
-                      title: 'الحديث',
-                      icon: Icons.auto_stories,
-                      isDarkMode: isDarkMode,
-                    ),
-                    CategoryIcon(
-                      title: 'التفسير',
-                      icon: Icons.menu_book,
-                      isDarkMode: isDarkMode,
-                    ),
-                    CategoryIcon(
-                      title: 'السيرة',
-                      icon: Icons.book,
-                      isDarkMode: isDarkMode,
-                    ),
-                    CategoryIcon(
-                      title: 'الفقه',
-                      icon: Icons.library_books,
-                      isDarkMode: isDarkMode,
-                    ),
-                  ],
+                const SizedBox(height: 24),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      CategoryIcon(
+                        title: 'الحديث',
+                        icon: Icons.auto_stories,
+                        isDarkMode: isDarkMode,
+                      ),
+                      CategoryIcon(
+                        title: 'التفسير',
+                        icon: Icons.menu_book,
+                        isDarkMode: isDarkMode,
+                      ),
+                      CategoryIcon(
+                        title: 'السيرة',
+                        icon: Icons.book,
+                        isDarkMode: isDarkMode,
+                      ),
+                      CategoryIcon(
+                        title: 'الفقه',
+                        icon: Icons.library_books,
+                        isDarkMode: isDarkMode,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 24),
-              // أوقات الصلاة
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: _buildPrayerTimesSection(),
-              ),
-              const SizedBox(height: 24),
-              // My List section for signed-in users
-              Consumer<AuthProvider>(
-                builder: (context, auth, child) {
-                  if (auth.canInteract) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: Column(
+                const SizedBox(height: 24),
+                // أوقات الصلاة
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: _buildPrayerTimesSection(),
+                ),
+                const SizedBox(height: 24),
+                // My List section for signed-in users
+                Consumer<AuthProvider>(
+                  builder: (context, auth, child) {
+                    if (auth.canInteract) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'قائمتي',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.green,
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () => _showMyList(context),
+                                  child: const Text('عرض الكل'),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            if (_bookmarkedLectures.isNotEmpty ||
+                                _likedLectures.isNotEmpty)
+                              Container(
+                                height: 60,
+                                child: ListView(
+                                  scrollDirection: Axis.horizontal,
+                                  children: [
+                                    if (_bookmarkedLectures.isNotEmpty)
+                                      _buildQuickActionCard(
+                                        'المحاضرات المحفوظة',
+                                        Icons.bookmark,
+                                        Colors.blue,
+                                        _bookmarkedLectures.length,
+                                      ),
+                                    if (_likedLectures.isNotEmpty)
+                                      _buildQuickActionCard(
+                                        'المحاضرات المعجبة',
+                                        Icons.favorite,
+                                        Colors.red,
+                                        _likedLectures.length,
+                                      ),
+                                  ],
+                                ),
+                              )
+                            else
+                              Container(
+                                height: 60,
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[100],
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.grey[300]!),
+                                ),
+                                child: const Center(
+                                  child: Text(
+                                    'ابدأ بحفظ المحاضرات المفضلة',
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
+                const SizedBox(height: 24),
+                // خريطة المسجد النبوي
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'خريطة المسجد النبوي',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      MosqueMapPreview(toggleTheme: widget.toggleTheme),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+                // Hierarchical Content: Category → Subcategory → Lectures
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Consumer<LectureProvider>(
+                    builder: (context, lectureProvider, child) {
+                      if (lectureProvider.isLoading) {
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(24.0),
+                            child: CircularProgressIndicator(),
+                          ),
+                        );
+                      }
+
+                      // Check if there are any lectures to display
+                      final lectures = lectureProvider.allLectures;
+                      if (lectures.isEmpty) {
+                        return Card(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(24.0),
+                            child: Center(
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.library_books,
+                                    size: 48,
+                                    color: Colors.grey[400],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'لا توجد محاضرات بعد',
+                                    style: TextStyle(color: Colors.grey[600]),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+
+                      // Build a simple hierarchy from lectures
+                      final hierarchy = <String, dynamic>{
+                        'fiqh': {'lectures': lectureProvider.fiqhLectures},
+                        'hadith': {'lectures': lectureProvider.hadithLectures},
+                        'tafsir': {'lectures': lectureProvider.tafsirLectures},
+                        'seerah': {'lectures': lectureProvider.seerahLectures},
+                      };
+                      return _buildHierarchicalContent(hierarchy);
+                    },
+                  ),
+                ),
+                const SizedBox(height: 24),
+                // المضافة مؤخرًا (Recently Added - keep for backward compatibility)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Consumer<LectureProvider>(
+                    builder: (context, lectureProvider, child) {
+                      final recentLectures = lectureProvider.recentLectures;
+
+                      return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               const Text(
-                                'قائمتي',
+                                'المضافة مؤخرًا',
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.green,
                                 ),
                               ),
-                              TextButton(
-                                onPressed: () => _showMyList(context),
-                                child: const Text('عرض الكل'),
-                              ),
+                              if (recentLectures.isNotEmpty)
+                                TextButton(
+                                  onPressed: () {
+                                    lectureProvider.loadAllSections();
+                                  },
+                                  child: const Icon(
+                                    Icons.refresh,
+                                    size: 20,
+                                    color: Colors.green,
+                                  ),
+                                ),
                             ],
                           ),
                           const SizedBox(height: 8),
-                          if (_bookmarkedLectures.isNotEmpty ||
-                              _likedLectures.isNotEmpty)
-                            Container(
-                              height: 60,
-                              child: ListView(
-                                scrollDirection: Axis.horizontal,
-                                children: [
-                                  if (_bookmarkedLectures.isNotEmpty)
-                                    _buildQuickActionCard(
-                                      'المحاضرات المحفوظة',
-                                      Icons.bookmark,
-                                      Colors.blue,
-                                      _bookmarkedLectures.length,
-                                    ),
-                                  if (_likedLectures.isNotEmpty)
-                                    _buildQuickActionCard(
-                                      'المحاضرات المعجبة',
-                                      Icons.favorite,
-                                      Colors.red,
-                                      _likedLectures.length,
-                                    ),
-                                ],
-                              ),
-                            )
-                          else
-                            Container(
-                              height: 60,
-                              decoration: BoxDecoration(
-                                color: Colors.grey[100],
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.grey[300]!),
-                              ),
-                              child: const Center(
-                                child: Text(
-                                  'ابدأ بحفظ المحاضرات المفضلة',
-                                  style: TextStyle(color: Colors.grey),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  }
-                  return const SizedBox.shrink();
-                },
-              ),
-              const SizedBox(height: 24),
-              // خريطة المسجد النبوي
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'خريطة المسجد النبوي',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    MosqueMapPreview(toggleTheme: widget.toggleTheme),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-              // المضافة مؤخرًا
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: Consumer<LectureProvider>(
-                  builder: (context, lectureProvider, child) {
-                    final recentLectures = lectureProvider.recentLectures;
-
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'المضافة مؤخرًا',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.green,
-                              ),
-                            ),
-                            if (recentLectures.isNotEmpty)
-                              TextButton(
-                                onPressed: () {
-                                  lectureProvider.loadAllSections();
-                                },
-                                child: const Icon(
-                                  Icons.refresh,
-                                  size: 20,
-                                  color: Colors.green,
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        if (recentLectures.isEmpty)
-                          Card(
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(24.0),
-                              child: Center(
-                                child: Column(
-                                  children: [
-                                    Icon(
-                                      Icons.library_books,
-                                      size: 48,
-                                      color: Colors.grey[400],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      'لا توجد محاضرات بعد',
-                                      style: TextStyle(color: Colors.grey[600]),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          )
-                        else
-                          ...recentLectures.map((lecture) {
-                            IconData sectionIcon = Icons.menu_book_outlined;
-                            switch (lecture['section']) {
-                              case 'الفقه':
-                                sectionIcon = Icons.library_books;
-                                break;
-                              case 'الحديث':
-                                sectionIcon = Icons.auto_stories;
-                                break;
-                              case 'التفسير':
-                                sectionIcon = Icons.menu_book;
-                                break;
-                              case 'السيرة':
-                                sectionIcon = Icons.book;
-                                break;
-                            }
-
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 8),
+                          if (recentLectures.isEmpty)
+                            Card(
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: Consumer<AuthProvider>(
-                                builder: (context, auth, child) {
-                                  final canInteract = auth.canInteract;
-                                  return ListTile(
-                                    leading: CircleAvatar(
-                                      backgroundColor: Colors.green,
-                                      child: Icon(
-                                        sectionIcon,
-                                        color: Colors.white,
+                              child: Padding(
+                                padding: const EdgeInsets.all(24.0),
+                                child: Center(
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.library_books,
+                                        size: 48,
+                                        color: Colors.grey[400],
                                       ),
-                                    ),
-                                    title: Text(lecture['title']),
-                                    subtitle: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          lecture['description'],
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'لا توجد محاضرات بعد',
+                                        style: TextStyle(
+                                          color: Colors.grey[600],
                                         ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          'القسم: ${lecture['section']}',
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.green,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    trailing: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        // Bookmark button for signed-in users
-                                        IconButton(
-                                          onPressed: canInteract
-                                              ? () => _toggleBookmark(
-                                                  lecture['id'],
-                                                )
-                                              : null,
-                                          icon: Icon(
-                                            _isBookmarked(lecture['id'])
-                                                ? Icons.bookmark
-                                                : Icons.bookmark_border,
-                                            color: canInteract
-                                                ? Colors.green
-                                                : Colors.grey,
-                                          ),
-                                          tooltip: canInteract
-                                              ? 'حفظ المحاضرة'
-                                              : 'سجّل الدخول للحفظ',
-                                        ),
-                                        // Like button for signed-in users
-                                        IconButton(
-                                          onPressed: canInteract
-                                              ? () => _toggleLike(lecture['id'])
-                                              : null,
-                                          icon: Icon(
-                                            _isLiked(lecture['id'])
-                                                ? Icons.favorite
-                                                : Icons.favorite_border,
-                                            color: canInteract
-                                                ? Colors.red
-                                                : Colors.grey,
-                                          ),
-                                          tooltip: canInteract
-                                              ? 'إعجاب'
-                                              : 'سجّل الدخول للإعجاب',
-                                        ),
-                                        // Video indicator
-                                        if (lecture['video_path'] != null)
-                                          const Icon(
-                                            Icons.video_library,
-                                            color: Colors.green,
-                                          ),
-                                      ],
-                                    ),
-                                    onTap: () {
-                                      _showLectureDetails(context, lecture);
-                                    },
-                                  );
-                                },
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
-                            );
-                          }).toList(),
-                      ],
-                    );
-                  },
+                            )
+                          else
+                            ...recentLectures.map((lecture) {
+                              // Handle both canonical keys and Arabic names for section
+                              final section =
+                                  lecture['section']?.toString() ?? 'unknown';
+                              IconData sectionIcon = Icons.menu_book_outlined;
+                              if (section == 'fiqh' || section == 'الفقه') {
+                                sectionIcon = Icons.library_books;
+                              } else if (section == 'hadith' ||
+                                  section == 'الحديث') {
+                                sectionIcon = Icons.auto_stories;
+                              } else if (section == 'tafsir' ||
+                                  section == 'التفسير') {
+                                sectionIcon = Icons.menu_book;
+                              } else if (section == 'seerah' ||
+                                  section == 'السيرة') {
+                                sectionIcon = Icons.book;
+                              }
+
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Consumer<AuthProvider>(
+                                  builder: (context, auth, child) {
+                                    final canInteract = auth.canInteract;
+                                    return ListTile(
+                                      leading: CircleAvatar(
+                                        backgroundColor: Colors.green,
+                                        child: Icon(
+                                          sectionIcon,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      title: Text(
+                                        lecture['title']?.toString() ??
+                                            'بدون عنوان',
+                                      ),
+                                      subtitle: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          if (lecture['description']
+                                                  ?.toString()
+                                                  .isNotEmpty ==
+                                              true)
+                                            Text(
+                                              lecture['description']
+                                                      ?.toString() ??
+                                                  '',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'القسم: ${_getSectionDisplayName(lecture['section']?.toString() ?? '')}',
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.green,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          // Bookmark button for signed-in users
+                                          IconButton(
+                                            onPressed: canInteract
+                                                ? () => _toggleBookmark(
+                                                    lecture['id']?.toString() ??
+                                                        '',
+                                                  )
+                                                : null,
+                                            icon: Icon(
+                                              _isBookmarked(
+                                                    lecture['id']?.toString() ??
+                                                        '',
+                                                  )
+                                                  ? Icons.bookmark
+                                                  : Icons.bookmark_border,
+                                              color: canInteract
+                                                  ? Colors.green
+                                                  : Colors.grey,
+                                            ),
+                                            tooltip: canInteract
+                                                ? 'حفظ المحاضرة'
+                                                : 'سجّل الدخول للحفظ',
+                                          ),
+                                          // Like button for signed-in users
+                                          IconButton(
+                                            onPressed: canInteract
+                                                ? () => _toggleLike(
+                                                    lecture['id']?.toString() ??
+                                                        '',
+                                                  )
+                                                : null,
+                                            icon: Icon(
+                                              _isLiked(
+                                                    lecture['id']?.toString() ??
+                                                        '',
+                                                  )
+                                                  ? Icons.favorite
+                                                  : Icons.favorite_border,
+                                              color: canInteract
+                                                  ? Colors.red
+                                                  : Colors.grey,
+                                            ),
+                                            tooltip: canInteract
+                                                ? 'إعجاب'
+                                                : 'سجّل الدخول للإعجاب',
+                                          ),
+                                          // Video indicator
+                                          if (lecture['video_path']
+                                                  ?.toString()
+                                                  .isNotEmpty ==
+                                              true)
+                                            const Icon(
+                                              Icons.video_library,
+                                              color: Colors.green,
+                                            ),
+                                        ],
+                                      ),
+                                      onTap: () {
+                                        _showLectureDetails(context, lecture);
+                                      },
+                                    );
+                                  },
+                                ),
+                              );
+                            }).toList(),
+                        ],
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -762,38 +850,51 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _showLectureDetails(BuildContext context, Map<String, dynamic> lecture) {
+    // Null-safe field extraction
+    final title = lecture['title']?.toString() ?? 'بدون عنوان';
+    final section = lecture['section']?.toString() ?? '';
+    final description = lecture['description']?.toString() ?? '';
+    final videoPath = lecture['video_path']?.toString();
+    final createdAt = safeDateFromDynamic(
+      lecture['createdAt'] ?? lecture['created_at'],
+    );
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(lecture['title']),
+        title: Text(title),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'القسم: ${lecture['section']}',
-                  style: const TextStyle(
-                    color: Colors.green,
-                    fontWeight: FontWeight.bold,
+              if (section.isNotEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'القسم: ${_getSectionDisplayName(section)}',
+                    style: const TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'الوصف:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text(lecture['description']),
-              const SizedBox(height: 16),
-              if (lecture['video_path'] != null) ...[
+                const SizedBox(height: 16),
+              ],
+              if (description.isNotEmpty) ...[
+                const Text(
+                  'الوصف:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(description),
+                const SizedBox(height: 16),
+              ],
+              if (videoPath != null && videoPath.isNotEmpty) ...[
                 const Row(
                   children: [
                     Icon(Icons.video_library, color: Colors.green, size: 20),
@@ -809,10 +910,11 @@ class _HomePageState extends State<HomePage> {
                 ),
                 const SizedBox(height: 8),
               ],
-              Text(
-                'تاريخ الإضافة: ${_formatDate(lecture['created_at'])}',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
+              if (createdAt != null)
+                Text(
+                  'تاريخ الإضافة: ${_formatDate(createdAt)}',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
             ],
           ),
         ),
@@ -822,6 +924,248 @@ class _HomePageState extends State<HomePage> {
             child: const Text('إغلاق'),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Build hierarchical content: Category → Subcategory → Lectures
+  Widget _buildHierarchicalContent(Map<String, dynamic> hierarchy) {
+    final sections = ['fiqh', 'hadith', 'tafsir', 'seerah'];
+    final sectionDisplayNames = {
+      'fiqh': 'الفقه',
+      'hadith': 'الحديث',
+      'tafsir': 'التفسير',
+      'seerah': 'السيرة',
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'المحاضرات حسب الفئات',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.green,
+          ),
+        ),
+        const SizedBox(height: 16),
+        ...sections.map((section) {
+          final sectionData = hierarchy[section] as Map<String, dynamic>?;
+          if (sectionData == null) return const SizedBox.shrink();
+
+          final subcategories =
+              sectionData['subcategories'] as List<dynamic>? ?? [];
+          final uncategorizedLectures =
+              sectionData['uncategorizedLectures'] as List<dynamic>? ?? [];
+
+          // Skip section if it has no subcategories and no uncategorized lectures
+          if (subcategories.isEmpty && uncategorizedLectures.isEmpty) {
+            return const SizedBox.shrink();
+          }
+
+          return Card(
+            margin: const EdgeInsets.only(bottom: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: ExpansionTile(
+              leading: CircleAvatar(
+                backgroundColor: Colors.green,
+                child: Icon(_getSectionIcon(section), color: Colors.white),
+              ),
+              title: Text(
+                sectionDisplayNames[section] ?? section,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              subtitle: Text(
+                '${subcategories.length} فئة فرعية',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+              children: [
+                // Subcategories with lectures
+                ...subcategories.map((subcatData) {
+                  final subcat =
+                      subcatData['subcategory'] as Map<String, dynamic>?;
+                  final lectures =
+                      subcatData['lectures'] as List<dynamic>? ?? [];
+
+                  if (subcat == null) return const SizedBox.shrink();
+
+                  final subcatName = subcat['name']?.toString() ?? 'غير محدد';
+
+                  // Hide subcategory if it has zero lectures (optional - can show empty state)
+                  if (lectures.isEmpty) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16.0,
+                        vertical: 8.0,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.folder_outlined,
+                            size: 20,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            subcatName,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '(لا توجد محاضرات)',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  return ExpansionTile(
+                    leading: Icon(Icons.folder, size: 20, color: Colors.blue),
+                    title: Text(
+                      subcatName,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    subtitle: Text(
+                      '${lectures.length} محاضرة',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                    children: [
+                      ...lectures.map((lecture) {
+                        return _buildLectureCardFromHierarchy(lecture);
+                      }).toList(),
+                    ],
+                  );
+                }).toList(),
+
+                // Uncategorized lectures
+                if (uncategorizedLectures.isNotEmpty) ...[
+                  ExpansionTile(
+                    leading: Icon(
+                      Icons.folder_outlined,
+                      size: 20,
+                      color: Colors.orange,
+                    ),
+                    title: const Text(
+                      'غير مصنف',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    subtitle: Text(
+                      '${uncategorizedLectures.length} محاضرة',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                    children: [
+                      ...uncategorizedLectures.map((lecture) {
+                        return _buildLectureCardFromHierarchy(lecture);
+                      }).toList(),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          );
+        }).toList(),
+      ],
+    );
+  }
+
+  /// Get icon for section
+  IconData _getSectionIcon(String section) {
+    switch (section.toLowerCase()) {
+      case 'fiqh':
+        return Icons.library_books;
+      case 'hadith':
+        return Icons.auto_stories;
+      case 'tafsir':
+        return Icons.menu_book;
+      case 'seerah':
+        return Icons.book;
+      default:
+        return Icons.menu_book_outlined;
+    }
+  }
+
+  /// Build lecture card from hierarchy data (null-safe)
+  Widget _buildLectureCardFromHierarchy(dynamic lecture) {
+    final lectureMap = lecture as Map<String, dynamic>?;
+    if (lectureMap == null) return const SizedBox.shrink();
+
+    // Null-safe field extraction
+    final title = lectureMap['title']?.toString() ?? 'بدون عنوان';
+    final description = lectureMap['description']?.toString() ?? '';
+    final videoPath = lectureMap['video_path']?.toString();
+    final section = lectureMap['section']?.toString() ?? 'unknown';
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: Colors.green,
+          child: Icon(_getSectionIcon(section), color: Colors.white, size: 20),
+        ),
+        title: Text(
+          title,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (description.isNotEmpty) ...[
+              Text(
+                description,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+              const SizedBox(height: 4),
+            ],
+            Row(
+              children: [
+                Text(
+                  'القسم: ${_getSectionDisplayName(section)}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.green[700],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                if (videoPath != null && videoPath.trim().isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.video_library, size: 16, color: Colors.red[700]),
+                ],
+              ],
+            ),
+          ],
+        ),
+        trailing: IconButton(
+          icon: const Icon(Icons.arrow_forward_ios, size: 16),
+          onPressed: () {
+            _showLectureDetails(context, lectureMap);
+          },
+        ),
+        onTap: () {
+          _showLectureDetails(context, lectureMap);
+        },
       ),
     );
   }
@@ -865,6 +1209,24 @@ class _HomePageState extends State<HomePage> {
         ).showSnackBar(const SnackBar(content: Text('تم الإعجاب بالمحاضرة')));
       }
     });
+  }
+
+  /// Get Arabic display name for section (canonical key or Arabic name)
+  String _getSectionDisplayName(String section) {
+    final normalized = section.toLowerCase();
+    switch (normalized) {
+      case 'fiqh':
+        return 'الفقه';
+      case 'hadith':
+        return 'الحديث';
+      case 'tafsir':
+        return 'التفسير';
+      case 'seerah':
+        return 'السيرة';
+      default:
+        // If already Arabic, return as-is
+        return section;
+    }
   }
 
   Widget _buildQuickActionCard(

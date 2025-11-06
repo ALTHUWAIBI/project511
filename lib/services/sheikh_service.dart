@@ -162,7 +162,7 @@ class SheikhService {
   /// Get sheikh by ID
   Future<Map<String, dynamic>?> getSheikh(String sheikhId) async {
     try {
-      return await _repository.getUserByUniqueId(sheikhId, role: 'sheikh');
+      return await _repository.getSheikhByUniqueId(sheikhId);
     } catch (e) {
       developer.log('Error getting sheikh', name: 'SheikhService', error: e);
       return null;
@@ -229,7 +229,7 @@ class SheikhService {
       // Allocate unique ID
       final uniqueId = await allocateNextSheikhId();
 
-      // Create sheikh in sheikhs table (password will be hashed and stored in sheikhs table)
+      // Create sheikh in sheikhs table (passwordHash stored directly in sheikhs)
       final result = await _repository.createSheikh(
         name: name,
         email: email,
@@ -237,7 +237,7 @@ class SheikhService {
         uniqueId: uniqueId,
         category: category,
         password:
-            password, // Password is stored in sheikhs table as passwordHash
+            password, // Password will be hashed and stored in sheikhs.passwordHash
       );
 
       if (!result['success']) {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:new_project/provider/pro_login.dart';
 import 'package:new_project/provider/lecture_provider.dart';
+import 'package:new_project/provider/hierarchy_provider.dart';
 import 'package:new_project/screens/home_page.dart';
 import 'dart:developer' as developer;
 
@@ -39,10 +40,30 @@ class _SplashAuthGateState extends State<SplashAuthGate> {
         context,
         listen: false,
       );
+      final hierarchyProvider = Provider.of<HierarchyProvider>(
+        context,
+        listen: false,
+      );
 
       // Load all lectures from SQLite
       await lectureProvider.loadAllSections();
       developer.log('[SplashAuthGate] Lectures loaded from SQLite');
+
+      // Hydrate categories for all sections on startup
+      final sections = ['fiqh', 'hadith', 'tafsir', 'seerah'];
+      for (final section in sections) {
+        try {
+          await hierarchyProvider.loadCategoriesBySection(section);
+          developer.log(
+            '[SplashAuthGate] Categories loaded for section: $section',
+          );
+        } catch (e) {
+          developer.log(
+            '[SplashAuthGate] Error loading categories for $section: $e',
+          );
+          // Continue with other sections
+        }
+      }
 
       // Data is loaded, proceed to show UI
       if (mounted) {

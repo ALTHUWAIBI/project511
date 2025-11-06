@@ -28,17 +28,15 @@ class HierarchyService {
         order: order ?? 0,
       );
     } catch (e) {
-      print('Error adding category: $e');
       return {
         'success': false,
-        'message': 'حدث خطأ أثناء إضافة الفئة: $e',
+        'message': 'حدث خطأ في إضافة الفئة: $e',
         'categoryId': '',
       };
     }
   }
 
   /// Update category
-  /// TODO: Implement categories table in LocalRepository
   Future<Map<String, dynamic>> updateCategory({
     required String categoryId,
     required String name,
@@ -46,19 +44,25 @@ class HierarchyService {
     int? order,
     bool? isActive,
   }) async {
-    return {
-      'success': true,
-      'message': 'تحديث الفئات غير مدعوم حالياً في الوضع المحلي',
-    };
+    try {
+      return await _repository.updateCategory(
+        categoryId: categoryId,
+        name: name,
+        description: description,
+        order: order,
+      );
+    } catch (e) {
+      return {'success': false, 'message': 'حدث خطأ في تحديث الفئة: $e'};
+    }
   }
 
   /// Delete category
-  /// TODO: Implement categories table in LocalRepository
   Future<Map<String, dynamic>> deleteCategory(String categoryId) async {
-    return {
-      'success': true,
-      'message': 'حذف الفئات غير مدعوم حالياً في الوضع المحلي',
-    };
+    try {
+      return await _repository.deleteCategory(categoryId);
+    } catch (e) {
+      return {'success': false, 'message': 'حدث خطأ في حذف الفئة: $e'};
+    }
   }
 
   /// Get categories for a section

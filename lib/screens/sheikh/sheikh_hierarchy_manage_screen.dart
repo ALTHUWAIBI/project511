@@ -31,40 +31,35 @@ class _SheikhHierarchyManageScreenState
       routeName: '/sheikh/hierarchy/manage',
       child: Directionality(
         textDirection: TextDirection.rtl,
-        child: PopScope(
-          canPop: false,
-          onPopInvoked: (didPop) async {
-            if (!didPop) {
-              Navigator.of(context).pop(true);
-            }
-          },
-          child: Scaffold(
-            backgroundColor: const Color(0xFFE4E5D3),
-            appBar: AppBar(
-              title: const Text('إدارة التصنيفات'),
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-              centerTitle: true,
-              leading: IconButton(
-                icon: const Icon(Icons.arrow_back),
-                onPressed: () => Navigator.of(context).pop(true),
-              ),
+        child: Scaffold(
+          backgroundColor: const Color(0xFFE4E5D3),
+          appBar: AppBar(
+            title: const Text('إدارة التصنيفات'),
+            backgroundColor: Colors.green,
+            foregroundColor: Colors.white,
+            centerTitle: true,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () {
+                // Return true to indicate categories may have changed
+                Navigator.pop(context, true);
+              },
             ),
-            body: Column(
-              children: [
-                // Section Picker
-                _buildSectionPicker(),
-                const Divider(height: 1),
-                // Content based on selection
-                Expanded(
-                  child: _selectedCategoryId == null
-                      ? _buildCategoriesList()
-                      : _buildSubcategoriesList(),
-                ),
-              ],
-            ),
-            floatingActionButton: _buildFloatingActionButton(),
           ),
+          body: Column(
+            children: [
+              // Section Picker
+              _buildSectionPicker(),
+              const Divider(height: 1),
+              // Content based on selection
+              Expanded(
+                child: _selectedCategoryId == null
+                    ? _buildCategoriesList()
+                    : _buildSubcategoriesList(),
+              ),
+            ],
+          ),
+          floatingActionButton: _buildFloatingActionButton(),
         ),
       ),
     );
@@ -94,12 +89,19 @@ class _SheikhHierarchyManageScreenState
               );
             }).toList(),
             onChanged: (value) {
-              setState(() {
-                _selectedSection = value!;
-                _selectedCategoryId = null;
-                _selectedCategoryName = null;
-              });
-              _loadCategories();
+              if (value != null) {
+                setState(() {
+                  _selectedSection = value;
+                  _selectedCategoryId = null;
+                  _selectedCategoryName = null;
+                });
+                // Update provider's selected section and reload
+                final hierarchyProvider = Provider.of<HierarchyProvider>(
+                  context,
+                  listen: false,
+                );
+                hierarchyProvider.setSelectedSection(value);
+              }
             },
           ),
         ],
@@ -438,12 +440,12 @@ class _SheikhHierarchyManageScreenState
 
   // ==================== Data Loading ====================
 
-  void _loadCategories() {
+  Future<void> _loadCategories() async {
     final hierarchyProvider = Provider.of<HierarchyProvider>(
       context,
       listen: false,
     );
-    hierarchyProvider.loadCategoriesBySection(_selectedSection);
+    await hierarchyProvider.loadCategoriesBySection(_selectedSection);
   }
 
   void _loadSubcategories() {
@@ -803,14 +805,27 @@ class _SheikhHierarchyManageScreenState
     );
 
     if (success && mounted) {
-      Navigator.pop(context, true);
+      // Close dialog immediately
+      Navigator.pop(context);
+      // Show success message (non-blocking)
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('تم إضافة الفئة بنجاح'),
           backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
         ),
       );
-      _loadCategories();
+      // Reload categories in background
+      await _loadCategories();
+    } else if (mounted) {
+      // Show error if failed
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(hierarchyProvider.errorMessage ?? 'فشل إضافة الفئة'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
     }
   }
 
@@ -845,14 +860,27 @@ class _SheikhHierarchyManageScreenState
     );
 
     if (success && mounted) {
-      Navigator.pop(context, true);
+      // Close dialog immediately
+      Navigator.pop(context);
+      // Show success message (non-blocking)
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('تم تحديث الفئة بنجاح'),
           backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
         ),
       );
-      _loadCategories();
+      // Reload categories in background (provider handles this)
+      // No need to call _loadCategories as provider reloads automatically
+    } else if (mounted) {
+      // Show error if failed
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(hierarchyProvider.errorMessage ?? 'فشل تحديث الفئة'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
     }
   }
 
@@ -865,14 +893,27 @@ class _SheikhHierarchyManageScreenState
     final success = await hierarchyProvider.deleteCategory(categoryId);
 
     if (success && mounted) {
-      Navigator.pop(context, true);
+      // Close dialog immediately
+      Navigator.pop(context);
+      // Show success message (non-blocking)
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('تم حذف الفئة بنجاح'),
           backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
         ),
       );
-      _loadCategories();
+      // Reload categories in background (provider handles this)
+      // No need to call _loadCategories as provider reloads automatically
+    } else if (mounted) {
+      // Show error if failed
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(hierarchyProvider.errorMessage ?? 'فشل حذف الفئة'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
     }
   }
 

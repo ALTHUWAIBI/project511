@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:new_project/database/firebase_service.dart';
 import 'package:new_project/offline/firestore_shims.dart';
-import 'package:new_project/utils/date_converter.dart';
+import 'package:new_project/utils/time.dart';
 
 class DeleteLecturePage extends StatefulWidget {
   final String? section;

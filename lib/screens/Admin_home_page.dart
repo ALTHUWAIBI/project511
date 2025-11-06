@@ -7,7 +7,7 @@ import 'package:new_project/screens/admin_sheikh_list_page.dart';
 import 'package:new_project/screens/home_page.dart';
 import 'package:new_project/services/sheikh_service.dart';
 import 'package:new_project/provider/pro_login.dart';
-import 'package:new_project/utils/date_converter.dart';
+import 'package:new_project/utils/time.dart';
 import '../utils/page_transition.dart';
 
 class AdminPanelPage extends StatefulWidget {

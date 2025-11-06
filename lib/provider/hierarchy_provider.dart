@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:new_project/services/hierarchy_service.dart';
+import 'dart:developer' as developer;
 
 class HierarchyProvider extends ChangeNotifier {
   final HierarchyService _hierarchyService = HierarchyService();
@@ -8,7 +9,8 @@ class HierarchyProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _errorMessage;
   String? _selectedSection;
-  List<Map<String, dynamic>> _categories = [];
+  // Store categories per section for persistence
+  final Map<String, List<Map<String, dynamic>>> _categoriesBySection = {};
   List<Map<String, dynamic>> _subcategories = [];
   List<Map<String, dynamic>> _lectures = [];
 
@@ -16,7 +18,14 @@ class HierarchyProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   String? get selectedSection => _selectedSection;
-  List<Map<String, dynamic>> get categories => _categories;
+  // Get categories for currently selected section
+  List<Map<String, dynamic>> get categories {
+    if (_selectedSection != null) {
+      return _categoriesBySection[_selectedSection!] ?? [];
+    }
+    return [];
+  }
+
   List<Map<String, dynamic>> get subcategories => _subcategories;
   List<Map<String, dynamic>> get lectures => _lectures;
 
@@ -42,17 +51,41 @@ class HierarchyProvider extends ChangeNotifier {
     await loadCategoriesBySection(section);
   }
 
-  /// Load categories for a section
+  /// Load categories for a section (public reload API)
+  /// Sets loading flag, fetches from SQLite, updates in-memory state, notifies listeners
   Future<void> loadCategoriesBySection(String section) async {
+    developer.log(
+      '[HierarchyProvider] Reloading categories for section: $section',
+      name: 'loadCategoriesBySection',
+    );
     _setLoading(true);
     _setError(null);
+    notifyListeners(); // Notify before fetch
 
     try {
-      _categories = await _hierarchyService.getCategoriesBySection(section);
+      final categories = await _hierarchyService.getCategoriesBySection(
+        section,
+      );
+      _categoriesBySection[section] = categories;
+      developer.log(
+        '[HierarchyProvider] Loaded ${categories.length} categories for section: $section',
+        name: 'loadCategoriesBySection',
+      );
       _setLoading(false);
     } catch (e) {
+      developer.log(
+        '[HierarchyProvider] Error loading categories: $e',
+        name: 'loadCategoriesBySection',
+      );
       _setLoading(false);
       _setError('حدث خطأ في تحميل الفئات: $e');
+    }
+  }
+
+  /// Reload categories for the currently selected section
+  Future<void> reloadCurrentSectionCategories() async {
+    if (_selectedSection != null) {
+      await loadCategoriesBySection(_selectedSection!);
     }
   }
 
@@ -101,10 +134,30 @@ class HierarchyProvider extends ChangeNotifier {
     int? order,
     bool? isActive,
   }) async {
+    developer.log(
+      '[HierarchyProvider] Updating category: $categoryId',
+      name: 'updateCategory',
+    );
     _setLoading(true);
     _setError(null);
 
     try {
+      // Get section from existing category before update
+      String sectionId = _selectedSection ?? '';
+      if (sectionId.isEmpty) {
+        // Try to find category in any section
+        for (final entry in _categoriesBySection.entries) {
+          final found = entry.value.firstWhere(
+            (c) => c['id'] == categoryId,
+            orElse: () => {},
+          );
+          if (found.isNotEmpty) {
+            sectionId = found['section_id'] as String? ?? entry.key;
+            break;
+          }
+        }
+      }
+
       final result = await _hierarchyService.updateCategory(
         categoryId: categoryId,
         name: name,
@@ -114,9 +167,9 @@ class HierarchyProvider extends ChangeNotifier {
       );
 
       if (result['success']) {
-        // Reload categories for the current section
-        if (_selectedSection != null) {
-          await loadCategoriesBySection(_selectedSection!);
+        // Reload categories for the affected section
+        if (sectionId.isNotEmpty) {
+          await loadCategoriesBySection(sectionId);
         }
         _setLoading(false);
         return true;
@@ -134,16 +187,36 @@ class HierarchyProvider extends ChangeNotifier {
 
   /// Delete category
   Future<bool> deleteCategory(String categoryId) async {
+    developer.log(
+      '[HierarchyProvider] Deleting category: $categoryId',
+      name: 'deleteCategory',
+    );
     _setLoading(true);
     _setError(null);
 
     try {
+      // Get section from existing category before delete
+      String sectionId = _selectedSection ?? '';
+      if (sectionId.isEmpty) {
+        // Try to find category in any section
+        for (final entry in _categoriesBySection.entries) {
+          final found = entry.value.firstWhere(
+            (c) => c['id'] == categoryId,
+            orElse: () => {},
+          );
+          if (found.isNotEmpty) {
+            sectionId = found['section_id'] as String? ?? entry.key;
+            break;
+          }
+        }
+      }
+
       final result = await _hierarchyService.deleteCategory(categoryId);
 
       if (result['success']) {
-        // Reload categories for the current section
-        if (_selectedSection != null) {
-          await loadCategoriesBySection(_selectedSection!);
+        // Reload categories for the affected section
+        if (sectionId.isNotEmpty) {
+          await loadCategoriesBySection(sectionId);
         }
         _setLoading(false);
         return true;
@@ -339,7 +412,7 @@ class HierarchyProvider extends ChangeNotifier {
 
   /// Clear all data
   void clearData() {
-    _categories.clear();
+    _categoriesBySection.clear();
     _subcategories.clear();
     _lectures.clear();
     _errorMessage = null;

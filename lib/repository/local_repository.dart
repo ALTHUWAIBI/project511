@@ -3,7 +3,6 @@ import 'package:new_project/database/app_database.dart';
 import 'package:new_project/utils/time.dart';
 import 'package:new_project/utils/hash.dart';
 import 'package:new_project/utils/uuid.dart';
-import 'package:new_project/utils/date_converter.dart';
 import 'dart:developer' as developer;
 
 /// Local Repository - SQLite-only implementation
@@ -519,106 +518,6 @@ class LocalRepository {
     }
   }
 
-  // ==================== Category Management ====================
-
-  /// Get categories by section
-  /// Returns list of categories filtered by section_id and isDeleted=0, ordered by sortOrder then id
-  Future<List<Map<String, dynamic>>> getCategoriesBySection(
-    String sectionId,
-  ) async {
-    try {
-      return await _withRetry((db) async {
-        final normalizedSection = sectionId.trim();
-        if (normalizedSection.isEmpty) {
-          developer.log(
-            'getCategoriesBySection: empty sectionId',
-            name: 'LocalRepository',
-          );
-          return [];
-        }
-
-        final results = await db.query(
-          'categories',
-          where: 'section_id = ? AND isDeleted = ?',
-          whereArgs: [normalizedSection, 0],
-          orderBy: 'sortOrder ASC, id ASC',
-        );
-
-        final dbPath = await _dbService.getDatabasePath();
-        developer.log(
-          'getCategoriesBySection: found ${results.length} categories for section=$normalizedSection, DB=$dbPath',
-          name: 'LocalRepository',
-        );
-
-        return results;
-      }, 'getCategoriesBySection');
-    } catch (e) {
-      developer.log(
-        'Get categories by section error: $e',
-        name: 'LocalRepository',
-      );
-      return [];
-    }
-  }
-
-  /// Add a new category
-  /// Returns map with success, message, and categoryId
-  Future<Map<String, dynamic>> addCategory({
-    required String sectionId,
-    required String name,
-    String? description,
-    int order = 0,
-  }) async {
-    try {
-      return await _withRetry((db) async {
-        final normalizedName = name.trim();
-        if (normalizedName.isEmpty) {
-          throw Exception('Category name cannot be empty');
-        }
-
-        final normalizedSection = sectionId.trim();
-        if (normalizedSection.isEmpty) {
-          throw Exception('Section ID cannot be empty');
-        }
-
-        final categoryId = generateUUID();
-        final now = nowMillis();
-
-        final normalizedDescription = (description ?? '').trim();
-        final rowsAffected = await db.insert('categories', {
-          'id': categoryId,
-          'section_id': normalizedSection,
-          'name': normalizedName,
-          'description': normalizedDescription.isEmpty
-              ? null
-              : normalizedDescription,
-          'sortOrder': order,
-          'isDeleted': 0,
-          'createdAt': now,
-          'updatedAt': now,
-        });
-
-        if (rowsAffected > 0) {
-          final dbPath = await _dbService.getDatabasePath();
-          developer.log(
-            'addCategory: inserted categoryId=$categoryId, section=$normalizedSection, DB=$dbPath',
-            name: 'LocalRepository',
-          );
-          return {
-            'success': true,
-            'message': 'تم إضافة الفئة بنجاح',
-            'categoryId': categoryId,
-          };
-        } else {
-          return {'success': false, 'message': 'فشل إضافة الفئة'};
-        }
-      }, 'addCategory');
-    } catch (e) {
-      developer.log('Add category error: $e', name: 'LocalRepository');
-      return {'success': false, 'message': 'حدث خطأ أثناء إضافة الفئة: $e'};
-    }
-  }
-
   // ==================== Lecture Management ====================
 
   /// Add lecture
@@ -634,18 +533,34 @@ class LocalRepository {
         final lectureId = generateUUID();
         final now = nowMillis();
 
+        // Normalize section to canonical key
+        final normalizedSection = _normalizeSectionKey(section);
+
+        // Log the values being persisted for diagnostics
+        developer.log(
+          '[LocalRepository] Adding lecture: section=$normalizedSection (original=$section), isPublished=1, status=published',
+          name: 'addLecture',
+        );
+
         await db.insert('lectures', {
           'id': lectureId,
           'title': title,
-          'description': description,
-          'video_path': videoPath,
-          'section': section,
-          'subcategory_id': subcategoryId,
-          'status': 'draft',
-          'isPublished': 0,
+          'description': description ?? '',
+          'video_path': videoPath ?? '',
+          'section': normalizedSection,
+          'subcategory_id': subcategoryId ?? '',
+          'status': 'published',
+          'isPublished': 1,
+          'isDeleted': 0,
           'createdAt': now,
           'updatedAt': now,
         });
+
+        // Log for diagnostics
+        developer.log(
+          '[LocalRepository] Added lecture: id=$lectureId, section=$normalizedSection, isPublished=1, status=published, isDeleted=0',
+          name: 'addLecture',
+        );
 
         return {
           'success': true,
@@ -659,29 +574,30 @@ class LocalRepository {
     }
   }
 
-  /// Get all lectures
+  /// Get all lectures (only published and not deleted)
+  /// Filters: isDeleted=0 AND isPublished=1
   Future<List<Map<String, dynamic>>> getAllLectures() async {
     try {
       return await _withRetry((db) async {
         final results = await db.query(
           'lectures',
-          where: 'status NOT IN (?, ?)',
-          whereArgs: ['archived', 'deleted'],
+          where: 'isDeleted = ? AND isPublished = ?',
+          whereArgs: [0, 1],
           orderBy: 'createdAt DESC',
         );
 
         return results.map((row) {
           final lecture = Map<String, dynamic>.from(row);
+          // Ensure all string fields have defaults
+          lecture['title'] = lecture['title']?.toString() ?? '';
+          lecture['description'] = lecture['description']?.toString() ?? '';
+          lecture['video_path'] = lecture['video_path']?.toString() ?? '';
+          lecture['section'] = lecture['section']?.toString() ?? 'unknown';
+          lecture['categoryName'] = lecture['categoryName']?.toString() ?? '';
+          lecture['subcategoryName'] =
+              lecture['subcategoryName']?.toString() ?? '';
+          lecture['sheikhName'] = lecture['sheikhName']?.toString() ?? '';
           lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
-
-          // Convert date fields safely: int (epoch ms) -> DateTime
-          lecture['startTime'] = safeDateFromDynamic(lecture['startTime']);
-          lecture['endTime'] = safeDateFromDynamic(lecture['endTime']);
-          lecture['createdAt'] = safeDateFromDynamic(lecture['createdAt']);
-          lecture['updatedAt'] = safeDateFromDynamic(lecture['updatedAt']);
-          lecture['archivedAt'] = safeDateFromDynamic(lecture['archivedAt']);
-          lecture['deletedAt'] = safeDateFromDynamic(lecture['deletedAt']);
-
           return lecture;
         }).toList();
       }, 'getAllLectures');
@@ -691,31 +607,35 @@ class LocalRepository {
     }
   }
 
-  /// Get lectures by section
+  /// Get lectures by section (only published and not deleted)
+  /// Accepts both canonical keys (fiqh) and Arabic names (الفقه)
   Future<List<Map<String, dynamic>>> getLecturesBySection(
     String section,
   ) async {
     try {
       return await _withRetry((db) async {
+        // Normalize section to canonical key for query
+        final normalizedSection = _normalizeSectionKey(section);
+
         final results = await db.query(
           'lectures',
-          where: 'section = ? AND status NOT IN (?, ?)',
-          whereArgs: [section, 'archived', 'deleted'],
+          where: 'section = ? AND isDeleted = ? AND isPublished = ?',
+          whereArgs: [normalizedSection, 0, 1],
           orderBy: 'startTime DESC, createdAt DESC',
         );
 
         return results.map((row) {
           final lecture = Map<String, dynamic>.from(row);
+          // Ensure all string fields have defaults
+          lecture['title'] = lecture['title']?.toString() ?? '';
+          lecture['description'] = lecture['description']?.toString() ?? '';
+          lecture['video_path'] = lecture['video_path']?.toString() ?? '';
+          lecture['section'] = lecture['section']?.toString() ?? 'unknown';
+          lecture['categoryName'] = lecture['categoryName']?.toString() ?? '';
+          lecture['subcategoryName'] =
+              lecture['subcategoryName']?.toString() ?? '';
+          lecture['sheikhName'] = lecture['sheikhName']?.toString() ?? '';
           lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
-
-          // Convert date fields safely: int (epoch ms) -> DateTime
-          lecture['startTime'] = safeDateFromDynamic(lecture['startTime']);
-          lecture['endTime'] = safeDateFromDynamic(lecture['endTime']);
-          lecture['createdAt'] = safeDateFromDynamic(lecture['createdAt']);
-          lecture['updatedAt'] = safeDateFromDynamic(lecture['updatedAt']);
-          lecture['archivedAt'] = safeDateFromDynamic(lecture['archivedAt']);
-          lecture['deletedAt'] = safeDateFromDynamic(lecture['deletedAt']);
-
           return lecture;
         }).toList();
       }, 'getLecturesBySection');
@@ -728,7 +648,7 @@ class LocalRepository {
     }
   }
 
-  /// Get lectures by subcategory
+  /// Get lectures by subcategory (only published and not deleted)
   Future<List<Map<String, dynamic>>> getLecturesBySubcategory(
     String subcategoryId,
   ) async {
@@ -736,23 +656,23 @@ class LocalRepository {
       return await _withRetry((db) async {
         final results = await db.query(
           'lectures',
-          where: 'subcategory_id = ? AND status NOT IN (?, ?)',
-          whereArgs: [subcategoryId, 'archived', 'deleted'],
+          where: 'subcategory_id = ? AND isDeleted = ? AND isPublished = ?',
+          whereArgs: [subcategoryId, 0, 1],
           orderBy: 'createdAt DESC',
         );
 
         return results.map((row) {
           final lecture = Map<String, dynamic>.from(row);
+          // Ensure all string fields have defaults
+          lecture['title'] = lecture['title']?.toString() ?? '';
+          lecture['description'] = lecture['description']?.toString() ?? '';
+          lecture['video_path'] = lecture['video_path']?.toString() ?? '';
+          lecture['section'] = lecture['section']?.toString() ?? 'unknown';
+          lecture['categoryName'] = lecture['categoryName']?.toString() ?? '';
+          lecture['subcategoryName'] =
+              lecture['subcategoryName']?.toString() ?? '';
+          lecture['sheikhName'] = lecture['sheikhName']?.toString() ?? '';
           lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
-
-          // Convert date fields safely: int (epoch ms) -> DateTime
-          lecture['startTime'] = safeDateFromDynamic(lecture['startTime']);
-          lecture['endTime'] = safeDateFromDynamic(lecture['endTime']);
-          lecture['createdAt'] = safeDateFromDynamic(lecture['createdAt']);
-          lecture['updatedAt'] = safeDateFromDynamic(lecture['updatedAt']);
-          lecture['archivedAt'] = safeDateFromDynamic(lecture['archivedAt']);
-          lecture['deletedAt'] = safeDateFromDynamic(lecture['deletedAt']);
-
           return lecture;
         }).toList();
       }, 'getLecturesBySubcategory');
@@ -780,15 +700,6 @@ class LocalRepository {
 
         final lecture = Map<String, dynamic>.from(results.first);
         lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
-
-        // Convert date fields safely: int (epoch ms) -> DateTime
-        lecture['startTime'] = safeDateFromDynamic(lecture['startTime']);
-        lecture['endTime'] = safeDateFromDynamic(lecture['endTime']);
-        lecture['createdAt'] = safeDateFromDynamic(lecture['createdAt']);
-        lecture['updatedAt'] = safeDateFromDynamic(lecture['updatedAt']);
-        lecture['archivedAt'] = safeDateFromDynamic(lecture['archivedAt']);
-        lecture['deletedAt'] = safeDateFromDynamic(lecture['deletedAt']);
-
         return lecture;
       }, 'getLecture');
     } catch (e) {
@@ -869,7 +780,7 @@ class LocalRepository {
               SELECT l.* FROM lectures l
               JOIN lectures_fts fts ON l.rowid = fts.rowid
               WHERE fts MATCH $ftsQuery
-                AND l.status NOT IN ('archived', 'deleted')
+                AND l.isDeleted = 0 AND l.isPublished = 1
               ORDER BY l.createdAt DESC
             ''', []);
             developer.log('Using FTS5 search', name: 'LocalRepository');
@@ -883,8 +794,8 @@ class LocalRepository {
             results = await db.query(
               'lectures',
               where:
-                  '(title LIKE ? OR description LIKE ?) AND status NOT IN (?, ?)',
-              whereArgs: [searchPattern, searchPattern, 'archived', 'deleted'],
+                  '(title LIKE ? OR description LIKE ?) AND isDeleted = ? AND isPublished = ?',
+              whereArgs: [searchPattern, searchPattern, 0, 1],
               orderBy: 'createdAt DESC',
             );
           }
@@ -907,15 +818,6 @@ class LocalRepository {
         return results.map((row) {
           final lecture = Map<String, dynamic>.from(row);
           lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
-
-          // Convert date fields safely: int (epoch ms) -> DateTime
-          lecture['startTime'] = safeDateFromDynamic(lecture['startTime']);
-          lecture['endTime'] = safeDateFromDynamic(lecture['endTime']);
-          lecture['createdAt'] = safeDateFromDynamic(lecture['createdAt']);
-          lecture['updatedAt'] = safeDateFromDynamic(lecture['updatedAt']);
-          lecture['archivedAt'] = safeDateFromDynamic(lecture['archivedAt']);
-          lecture['deletedAt'] = safeDateFromDynamic(lecture['deletedAt']);
-
           return lecture;
         }).toList();
       }, 'searchLectures');
@@ -925,10 +827,178 @@ class LocalRepository {
     }
   }
 
+  // ==================== Categories Management ====================
+
+  /// Get categories by section (only non-deleted)
+  Future<List<Map<String, dynamic>>> getCategoriesBySection(
+    String section,
+  ) async {
+    try {
+      return await _withRetry((db) async {
+        // Normalize section to canonical key
+        final normalizedSection = _normalizeSectionKey(section);
+
+        final results = await db.query(
+          'categories',
+          where: 'section_id = ? AND isDeleted = ?',
+          whereArgs: [normalizedSection, 0],
+          orderBy: 'sortOrder ASC, id ASC',
+        );
+
+        // Log for diagnostics
+        developer.log(
+          '[LocalRepository] getCategoriesBySection: section=$normalizedSection, found ${results.length} categories',
+          name: 'getCategoriesBySection',
+        );
+
+        return results;
+      }, 'getCategoriesBySection');
+    } catch (e) {
+      developer.log(
+        'Get categories by section error: $e',
+        name: 'LocalRepository',
+      );
+      return [];
+    }
+  }
+
+  /// Add a new category
+  Future<Map<String, dynamic>> addCategory({
+    required String sectionId,
+    required String name,
+    String? description,
+    int order = 0,
+  }) async {
+    try {
+      return await _withRetry((db) async {
+        // Normalize inputs
+        final normalizedName = (name ?? '').trim();
+        if (normalizedName.isEmpty) {
+          throw Exception('Category name cannot be empty');
+        }
+
+        final normalizedSection = _normalizeSectionKey(sectionId);
+        final normalizedDesc = description?.trim();
+
+        final categoryId = generateUUID();
+        final now = nowMillis();
+
+        // Log for diagnostics
+        final dbPath = await _dbService.getDatabasePath();
+        developer.log(
+          '[LocalRepository] addCategory: section=$normalizedSection, name=$normalizedName, dbPath=$dbPath',
+          name: 'addCategory',
+        );
+
+        await db.insert('categories', {
+          'id': categoryId,
+          'section_id': normalizedSection,
+          'name': normalizedName,
+          'description': normalizedDesc,
+          'sortOrder': order,
+          'isDeleted': 0,
+          'createdAt': now,
+          'updatedAt': now,
+        });
+
+        // Log row count after insert
+        final countResult = await db.rawQuery(
+          'SELECT COUNT(*) as count FROM categories WHERE section_id = ? AND isDeleted = 0',
+          [normalizedSection],
+        );
+        final count = Sqflite.firstIntValue(countResult) ?? 0;
+        developer.log(
+          '[LocalRepository] Categories count for section $normalizedSection: $count',
+          name: 'addCategory',
+        );
+
+        return {
+          'success': true,
+          'message': 'تم إضافة الفئة بنجاح',
+          'category_id': categoryId,
+        };
+      }, 'addCategory');
+    } catch (e) {
+      developer.log('Add category error: $e', name: 'LocalRepository');
+      return {'success': false, 'message': 'حدث خطأ أثناء إضافة الفئة: $e'};
+    }
+  }
+
+  /// Update category
+  Future<Map<String, dynamic>> updateCategory({
+    required String categoryId,
+    String? name,
+    String? description,
+    int? order,
+  }) async {
+    try {
+      return await _withRetry((db) async {
+        final updates = <String, dynamic>{'updatedAt': nowMillis()};
+
+        if (name != null) {
+          final normalizedName = (name ?? '').trim();
+          if (normalizedName.isEmpty) {
+            throw Exception('Category name cannot be empty');
+          }
+          updates['name'] = normalizedName;
+        }
+
+        if (description != null) {
+          updates['description'] = (description ?? '').trim();
+        }
+
+        if (order != null) {
+          updates['sortOrder'] = order;
+        }
+
+        final rowsAffected = await db.update(
+          'categories',
+          updates,
+          where: 'id = ? AND isDeleted = 0',
+          whereArgs: [categoryId],
+        );
+
+        if (rowsAffected == 0) {
+          return {'success': false, 'message': 'الفئة غير موجودة أو تم حذفها'};
+        }
+
+        return {'success': true, 'message': 'تم تحديث الفئة بنجاح'};
+      }, 'updateCategory');
+    } catch (e) {
+      developer.log('Update category error: $e', name: 'LocalRepository');
+      return {'success': false, 'message': 'حدث خطأ أثناء تحديث الفئة: $e'};
+    }
+  }
+
+  /// Delete category (soft delete)
+  Future<Map<String, dynamic>> deleteCategory(String categoryId) async {
+    try {
+      return await _withRetry((db) async {
+        final rowsAffected = await db.update(
+          'categories',
+          {'isDeleted': 1, 'updatedAt': nowMillis()},
+          where: 'id = ? AND isDeleted = 0',
+          whereArgs: [categoryId],
+        );
+
+        if (rowsAffected == 0) {
+          return {
+            'success': false,
+            'message': 'الفئة غير موجودة أو تم حذفها مسبقاً',
+          };
+        }
+
+        return {'success': true, 'message': 'تم حذف الفئة بنجاح'};
+      }, 'deleteCategory');
+    } catch (e) {
+      developer.log('Delete category error: $e', name: 'LocalRepository');
+      return {'success': false, 'message': 'حدث خطأ أثناء حذف الفئة: $e'};
+    }
+  }
+
   // ==================== Sheikh Lecture Management ====================
 
   /// Add sheikh lecture
-  /// startTime and endTime can be DateTime, int (epoch ms), Timestamp, or String (ISO)
   Future<Map<String, dynamic>> addSheikhLecture({
     required String sheikhId,
     required String sheikhName,
@@ -939,8 +1009,8 @@ class LocalRepository {
     String? subcategoryName,
     required String title,
     String? description,
-    required dynamic startTime, // DateTime, int, Timestamp, String
-    dynamic endTime, // DateTime, int, Timestamp, String, null
+    required int startTime,
+    int? endTime,
     Map<String, dynamic>? location,
     Map<String, dynamic>? media,
   }) async {
@@ -956,32 +1026,41 @@ class LocalRepository {
               media['videoPath']?.toString() ?? media['video_path']?.toString();
         }
 
-        // Convert dates to epoch milliseconds for SQLite storage
-        final startTimeMs = safeDateToEpochMsFromDynamic(startTime);
-        if (startTimeMs == null) {
-          throw Exception('startTime is required and must be a valid date');
-        }
-        final endTimeMs = safeDateToEpochMsFromDynamic(endTime);
+        // Normalize section to canonical key (e.g., 'الفقه' -> 'fiqh')
+        final normalizedSection = _normalizeSectionKey(section);
+
+        // Log the values being persisted for diagnostics
+        developer.log(
+          '[LocalRepository] Adding lecture: section=$normalizedSection (original=$section), isPublished=1, status=published',
+          name: 'addSheikhLecture',
+        );
 
         await db.insert('lectures', {
           'id': lectureId,
           'title': title,
-          'description': description,
-          'video_path': videoPath,
-          'section': section,
-          'subcategory_id': subcategoryId,
+          'description': description ?? '',
+          'video_path': videoPath ?? '',
+          'section': normalizedSection,
+          'subcategory_id': subcategoryId ?? '',
           'sheikhId': sheikhId,
           'sheikhName': sheikhName,
           'categoryId': categoryId,
           'categoryName': categoryName,
           'subcategoryName': subcategoryName,
-          'startTime': startTimeMs,
-          'endTime': endTimeMs,
-          'status': 'draft',
-          'isPublished': 0,
+          'startTime': startTime,
+          'endTime': endTime,
+          'status': 'published',
+          'isPublished': 1,
+          'isDeleted': 0,
           'createdAt': now,
           'updatedAt': now,
         });
+
+        // Log for diagnostics
+        developer.log(
+          '[LocalRepository] Added lecture: id=$lectureId, section=$normalizedSection, isPublished=1, status=published, isDeleted=0, categoryId=$categoryId',
+          name: 'addSheikhLecture',
+        );
 
         return {
           'success': true,
@@ -995,80 +1074,57 @@ class LocalRepository {
     }
   }
 
+  /// Normalize section key (helper method)
+  String _normalizeSectionKey(String? section) {
+    if (section == null || section.isEmpty) {
+      return 'unknown';
+    }
+
+    // Map Arabic names to canonical keys
+    switch (section.trim()) {
+      case 'الفقه':
+        return 'fiqh';
+      case 'الحديث':
+        return 'hadith';
+      case 'السيرة':
+        return 'seerah';
+      case 'التفسير':
+        return 'tafsir';
+      // If already a canonical key, return as-is
+      case 'fiqh':
+      case 'hadith':
+      case 'seerah':
+      case 'tafsir':
+        return section.trim();
+      // Default: lowercase and return
+      default:
+        return section.trim().toLowerCase();
+    }
+  }
+
   /// Get lectures by sheikh
   Future<List<Map<String, dynamic>>> getLecturesBySheikh(
     String sheikhId,
   ) async {
     try {
       return await _withRetry((db) async {
+        // Sheikh queries: show all non-deleted lectures (including archived)
         final results = await db.query(
           'lectures',
-          where: 'sheikhId = ? AND status NOT IN (?, ?)',
-          whereArgs: [sheikhId, 'archived', 'deleted'],
+          where: 'sheikhId = ? AND isDeleted = ?',
+          whereArgs: [sheikhId, 0],
           orderBy: 'startTime DESC',
         );
 
         return results.map((row) {
           final lecture = Map<String, dynamic>.from(row);
           lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
-
-          // Convert date fields safely: int (epoch ms) -> DateTime
-          lecture['startTime'] = safeDateFromDynamic(lecture['startTime']);
-          lecture['endTime'] = safeDateFromDynamic(lecture['endTime']);
-          lecture['createdAt'] = safeDateFromDynamic(lecture['createdAt']);
-          lecture['updatedAt'] = safeDateFromDynamic(lecture['updatedAt']);
-          lecture['archivedAt'] = safeDateFromDynamic(lecture['archivedAt']);
-          lecture['deletedAt'] = safeDateFromDynamic(lecture['deletedAt']);
-
           return lecture;
         }).toList();
       }, 'getLecturesBySheikh');
     } catch (e) {
       developer.log(
         'Get lectures by sheikh error: $e',
-        name: 'LocalRepository',
-      );
-      return [];
-    }
-  }
-
-  /// Get lectures by category (for any sheikh)
-  /// Returns lectures filtered by categoryId and isDeleted=0, ordered by startTime
-  Future<List<Map<String, dynamic>>> getLecturesByCategory(
-    String categoryId,
-  ) async {
-    try {
-      return await _withRetry((db) async {
-        final normalizedCategoryId = categoryId.trim();
-        if (normalizedCategoryId.isEmpty) {
-          return [];
-        }
-
-        final results = await db.query(
-          'lectures',
-          where: 'categoryId = ? AND status NOT IN (?, ?)',
-          whereArgs: [normalizedCategoryId, 'archived', 'deleted'],
-          orderBy: 'startTime DESC, createdAt DESC',
-        );
-
-        return results.map((row) {
-          final lecture = Map<String, dynamic>.from(row);
-          lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
-
-          // Convert date fields safely: int (epoch ms) -> DateTime
-          lecture['startTime'] = safeDateFromDynamic(lecture['startTime']);
-          lecture['endTime'] = safeDateFromDynamic(lecture['endTime']);
-          lecture['createdAt'] = safeDateFromDynamic(lecture['createdAt']);
-          lecture['updatedAt'] = safeDateFromDynamic(lecture['updatedAt']);
-          lecture['archivedAt'] = safeDateFromDynamic(lecture['archivedAt']);
-          lecture['deletedAt'] = safeDateFromDynamic(lecture['deletedAt']);
-
-          return lecture;
-        }).toList();
-      }, 'getLecturesByCategory');
-    } catch (e) {
-      developer.log(
-        'Get lectures by category error: $e',
         name: 'LocalRepository',
       );
       return [];
@@ -1084,23 +1140,14 @@ class LocalRepository {
       return await _withRetry((db) async {
         final results = await db.query(
           'lectures',
-          where: 'sheikhId = ? AND categoryId = ? AND status NOT IN (?, ?)',
-          whereArgs: [sheikhId, categoryId, 'archived', 'deleted'],
+          where: 'sheikhId = ? AND categoryId = ? AND isDeleted = ?',
+          whereArgs: [sheikhId, categoryId, 0],
           orderBy: 'startTime DESC',
         );
 
         return results.map((row) {
           final lecture = Map<String, dynamic>.from(row);
           lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
-
-          // Convert date fields safely: int (epoch ms) -> DateTime
-          lecture['startTime'] = safeDateFromDynamic(lecture['startTime']);
-          lecture['endTime'] = safeDateFromDynamic(lecture['endTime']);
-          lecture['createdAt'] = safeDateFromDynamic(lecture['createdAt']);
-          lecture['updatedAt'] = safeDateFromDynamic(lecture['updatedAt']);
-          lecture['archivedAt'] = safeDateFromDynamic(lecture['archivedAt']);
-          lecture['deletedAt'] = safeDateFromDynamic(lecture['deletedAt']);
-
           return lecture;
         }).toList();
       }, 'getLecturesBySheikhAndCategory');
@@ -1114,34 +1161,26 @@ class LocalRepository {
   }
 
   /// Update sheikh lecture
-  /// startTime and endTime can be DateTime, int (epoch ms), Timestamp, or String (ISO)
   Future<Map<String, dynamic>> updateSheikhLecture({
     required String lectureId,
     required String sheikhId,
     required String title,
     String? description,
-    required dynamic startTime, // DateTime, int, Timestamp, String
-    dynamic endTime, // DateTime, int, Timestamp, String, null
+    required int startTime,
+    int? endTime,
     Map<String, dynamic>? location,
     Map<String, dynamic>? media,
   }) async {
     try {
       return await _withRetry((db) async {
-        // Convert dates to epoch milliseconds for SQLite storage
-        final startTimeMs = safeDateToEpochMsFromDynamic(startTime);
-        if (startTimeMs == null) {
-          throw Exception('startTime is required and must be a valid date');
-        }
-        final endTimeMs = safeDateToEpochMsFromDynamic(endTime);
-
         final Map<String, dynamic> updateData = {
           'title': title,
-          'startTime': startTimeMs,
+          'startTime': startTime,
           'updatedAt': nowMillis(),
         };
 
         if (description != null) updateData['description'] = description;
-        if (endTimeMs != null) updateData['endTime'] = endTimeMs;
+        if (endTime != null) updateData['endTime'] = endTime;
 
         // Update video path from media if provided
         if (media != null) {
@@ -1166,17 +1205,30 @@ class LocalRepository {
   }
 
   /// Archive sheikh lecture
+  /// Sets status='archived', isPublished=0, isDeleted=0
   Future<Map<String, dynamic>> archiveSheikhLecture({
     required String lectureId,
     required String sheikhId,
   }) async {
     try {
       return await _withRetry((db) async {
+        final now = nowMillis();
         await db.update(
           'lectures',
-          {'status': 'archived', 'updatedAt': nowMillis()},
+          {
+            'status': 'archived',
+            'isPublished': 0,
+            'isDeleted': 0,
+            'updatedAt': now,
+          },
           where: 'id = ? AND sheikhId = ?',
           whereArgs: [lectureId, sheikhId],
+        );
+
+        // Log for diagnostics
+        developer.log(
+          '[LocalRepository] Archived lecture: id=$lectureId, status=archived, isPublished=0, isDeleted=0',
+          name: 'archiveSheikhLecture',
         );
 
         return {'success': true, 'message': 'تم أرشفة المحاضرة بنجاح'};
@@ -1190,18 +1242,26 @@ class LocalRepository {
     }
   }
 
-  /// Delete sheikh lecture (soft delete)
+  /// Delete sheikh lecture (permanent delete)
+  /// Sets isDeleted=1
   Future<Map<String, dynamic>> deleteSheikhLecture({
     required String lectureId,
     required String sheikhId,
   }) async {
     try {
       return await _withRetry((db) async {
+        final now = nowMillis();
         await db.update(
           'lectures',
-          {'status': 'deleted', 'updatedAt': nowMillis()},
+          {'isDeleted': 1, 'status': 'deleted', 'updatedAt': now},
           where: 'id = ? AND sheikhId = ?',
           whereArgs: [lectureId, sheikhId],
+        );
+
+        // Log for diagnostics
+        developer.log(
+          '[LocalRepository] Deleted lecture: id=$lectureId, isDeleted=1',
+          name: 'deleteSheikhLecture',
         );
 
         return {'success': true, 'message': 'تم حذف المحاضرة بنجاح'};
@@ -1222,12 +1282,11 @@ class LocalRepository {
     try {
       return await _withRetry((db) async {
         String whereClause =
-            'sheikhId = ? AND status NOT IN (?, ?) AND ((startTime < ? AND (endTime IS NULL OR endTime > ?)) OR (startTime >= ? AND startTime < ?))';
+            'sheikhId = ? AND isDeleted = ? AND ((startTime < ? AND (endTime IS NULL OR endTime > ?)) OR (startTime >= ? AND startTime < ?))';
 
         List<dynamic> whereArgs = [
           sheikhId,
-          'archived',
-          'deleted',
+          0,
           endTime ?? startTime,
           startTime,
           startTime,
@@ -1261,11 +1320,11 @@ class LocalRepository {
   Future<Map<String, dynamic>> getSheikhLectureStats(String sheikhId) async {
     try {
       return await _withRetry((db) async {
-        // Total lectures (not archived/deleted)
+        // Total lectures (not deleted)
         final totalResults = await db.rawQuery(
           '''
           SELECT COUNT(*) as count FROM lectures
-          WHERE sheikhId = ? AND status NOT IN ('archived', 'deleted')
+          WHERE sheikhId = ? AND isDeleted = 0
         ''',
           [sheikhId],
         );
@@ -1282,7 +1341,7 @@ class LocalRepository {
           '''
           SELECT COUNT(*) as count FROM lectures
           WHERE sheikhId = ? 
-          AND status NOT IN ('archived', 'deleted')
+          AND isDeleted = 0
           AND startTime >= ? AND startTime < ?
         ''',
           [sheikhId, todayStartMillis, todayEndMillis],
@@ -1293,7 +1352,7 @@ class LocalRepository {
         final lastUpdatedResults = await db.rawQuery(
           '''
           SELECT MAX(updatedAt) as lastUpdated FROM lectures
-          WHERE sheikhId = ? AND status NOT IN ('archived', 'deleted')
+          WHERE sheikhId = ? AND isDeleted = 0
         ''',
           [sheikhId],
         );
@@ -1386,92 +1445,41 @@ class LocalRepository {
     }
   }
 
-  /// Login sheikh using uniqueId and password - uses sheikhs table only
-  /// Returns sheikh data if authentication succeeds, null otherwise
-  Future<Map<String, dynamic>?> loginSheikh(
-    String uniqueId,
-    String password,
-  ) async {
-    try {
-      return await _withRetry((db) async {
-        // Normalize inputs
-        final uid = uniqueId.trim().replaceAll(RegExp(r'[^0-9]'), '');
-        final pwd = password.trim();
-
-        if (uid.isEmpty || uid.length != 8) {
-          return null;
-        }
-        if (pwd.isEmpty) {
-          return null;
-        }
-
-        // Hash the password
-        final passwordHash = sha256Hex(pwd);
-
-        // Query sheikhs table for matching uniqueId and passwordHash
-        final results = await db.query(
-          'sheikhs',
-          where: 'uniqueId = ? AND passwordHash = ? AND isDeleted = 0',
-          whereArgs: [uid, passwordHash],
-          limit: 1,
-        );
-
-        if (results.isEmpty) {
-          return null;
-        }
-
-        final sheikh = Map<String, dynamic>.from(results.first);
-        // Map sheikh data to expected format (don't expose passwordHash)
-        return {
-          'id': sheikh['id']?.toString() ?? uid,
-          'uid': sheikh['id']?.toString() ?? uid,
-          'uniqueId': sheikh['uniqueId'],
-          'name': sheikh['name'],
-          'email': sheikh['email'],
-          'role': 'sheikh',
-          'category': sheikh['category'],
-          'phone': sheikh['phone'],
-        };
-      }, 'loginSheikh');
-    } catch (e) {
-      developer.log('Login sheikh error: $e', name: 'LocalRepository');
-      return null;
-    }
-  }
-
-  /// Get sheikh by uniqueId - uses sheikhs table only (single source of truth)
+  /// Get sheikh by uniqueId from sheikhs table only
   Future<Map<String, dynamic>?> getSheikhByUniqueId(String uniqueId) async {
     try {
       return await _withRetry((db) async {
         // Normalize uniqueId
-        final uid = uniqueId.trim().replaceAll(RegExp(r'[^0-9]'), '');
-        if (uid.isEmpty || uid.length != 8) {
-          return null;
-        }
+        final uidInput = uniqueId.trim();
+        if (uidInput.isEmpty) return null;
 
-        final results = await db.query(
+        final normalized = uidInput.replaceAll(RegExp(r'[^0-9]'), '');
+        if (normalized.length != 8) return null;
+
+        final sheikhResults = await db.query(
           'sheikhs',
           where: 'uniqueId = ? AND isDeleted = 0',
-          whereArgs: [uid],
+          whereArgs: [normalized],
           limit: 1,
         );
 
-        if (results.isEmpty) {
-          return null;
+        if (sheikhResults.isNotEmpty) {
+          final sheikh = Map<String, dynamic>.from(sheikhResults.first);
+          // Map sheikh data to user-like format for compatibility
+          return {
+            'id': sheikh['id']?.toString() ?? normalized,
+            'uid': sheikh['id']?.toString() ?? normalized,
+            'uniqueId': sheikh['uniqueId'] as String? ?? normalized,
+            'name': sheikh['name'] as String? ?? 'غير محدد',
+            'email': sheikh['email'] as String?,
+            'role': 'sheikh',
+            'category': sheikh['category'] as String?,
+            'phone': sheikh['phone'] as String?,
+            'passwordHash': sheikh['passwordHash'] as String?,
+          };
         }
 
-        final sheikh = Map<String, dynamic>.from(results.first);
-        // Map sheikh data to expected format (don't expose passwordHash)
-        return {
-          'id': sheikh['id']?.toString() ?? uid,
-          'uid': sheikh['id']?.toString() ?? uid,
-          'uniqueId': sheikh['uniqueId'],
-          'name': sheikh['name'],
-          'email': sheikh['email'],
-          'role': 'sheikh',
-          'category': sheikh['category'],
-          'phone': sheikh['phone'],
-        };
+        return null;
       }, 'getSheikhByUniqueId');
     } catch (e) {
       developer.log(
@@ -1482,18 +1490,83 @@ class LocalRepository {
     }
   }
 
-  /// Get user by uniqueId - for non-sheikh users only
-  /// For sheikhs, use getSheikhByUniqueId instead
+  /// Login sheikh using uniqueId and password from sheikhs table only
+  Future<Map<String, dynamic>> loginSheikh({
+    required String uniqueId,
+    required String password,
+  }) async {
+    try {
+      return await _withRetry((db) async {
+        // Normalize inputs
+        final uidInput = uniqueId.trim();
+        final pwdInput = password.trim();
+
+        if (uidInput.isEmpty || pwdInput.isEmpty) {
+          return {
+            'success': false,
+            'message': 'الرجاء إدخال رقم الشيخ وكلمة المرور',
+          };
+        }
+
+        final normalized = uidInput.replaceAll(RegExp(r'[^0-9]'), '');
+        if (normalized.length != 8) {
+          return {
+            'success': false,
+            'message': 'رقم الشيخ يجب أن يكون 8 أرقام بالضبط',
+          };
+        }
+
+        // Hash password
+        final passwordHash = sha256Hex(pwdInput);
+
+        // Query sheikhs table directly
+        final results = await db.query(
+          'sheikhs',
+          where: 'uniqueId = ? AND passwordHash = ? AND isDeleted = 0',
+          whereArgs: [normalized, passwordHash],
+          limit: 1,
+        );
+
+        if (results.isEmpty) {
+          return {
+            'success': false,
+            'message': 'رقم الشيخ أو كلمة المرور غير صحيحة',
+          };
+        }
+
+        final sheikh = Map<String, dynamic>.from(results.first);
+        return {
+          'success': true,
+          'message': 'تم تسجيل الدخول بنجاح',
+          'sheikh': {
+            'id': sheikh['id']?.toString() ?? normalized,
+            'uid': sheikh['id']?.toString() ?? normalized,
+            'uniqueId': sheikh['uniqueId'] as String? ?? normalized,
+            'name': sheikh['name'] as String? ?? 'غير محدد',
+            'email': sheikh['email'] as String?,
+            'role': 'sheikh',
+            'category': sheikh['category'] as String?,
+            'phone': sheikh['phone'] as String?,
+          },
+        };
+      }, 'loginSheikh');
+    } catch (e) {
+      developer.log('Login sheikh error: $e', name: 'LocalRepository');
+      return {'success': false, 'message': 'حدث خطأ أثناء تسجيل الدخول: $e'};
+    }
+  }
+
+  /// Get user by uniqueId - for backward compatibility (checks users table only)
   Future<Map<String, dynamic>?> getUserByUniqueId(
     String uniqueId, {
     String role = 'sheikh',
   }) async {
-    // For sheikh role, use sheikhs table exclusively
+    // For sheikh role, delegate to getSheikhByUniqueId
     if (role == 'sheikh') {
       return await getSheikhByUniqueId(uniqueId);
     }
 
-    // For other roles, use users table
+    // For other roles, check users table
     try {
       return await _withRetry((db) async {
         final userResults = await db.query(
@@ -1539,63 +1612,9 @@ class LocalRepository {
     }
   }
 
-  /// Delete sheikh by unique_sheikh_id (8 digits)
-  /// Soft-deletes the sheikh (sets isDeleted = 1) and archives related lectures
-  Future<Map<String, dynamic>> deleteSheikhByUniqueId(String uniqueId) async {
-    try {
-      return await _withRetry((db) async {
-        // Normalize uniqueId input (exactly 8 digits)
-        final normalized = uniqueId.trim().replaceAll(RegExp(r'[^0-9]'), '');
-        if (normalized.isEmpty || normalized.length != 8) {
-          return {
-            'success': false,
-            'message': 'رقم الشيخ يجب أن يكون 8 أرقام بالضبط',
-          };
-        }
-
-        // Check if sheikh exists
-        final results = await db.query(
-          'sheikhs',
-          where: 'uniqueId = ? AND isDeleted = 0',
-          whereArgs: [normalized],
-          limit: 1,
-        );
-
-        if (results.isEmpty) {
-          return {'success': false, 'message': 'الشيخ غير موجود'};
-        }
-
-        final sheikh = results.first;
-        final sheikhId = sheikh['id']?.toString();
-
-        // Archive all lectures by this sheikh
-        if (sheikhId != null) {
-          await archiveLecturesBySheikh(sheikhId);
-        }
-
-        // Soft-delete the sheikh
-        final now = nowMillis();
-        await db.update(
-          'sheikhs',
-          {'isDeleted': 1, 'updatedAt': now},
-          where: 'uniqueId = ?',
-          whereArgs: [normalized],
-        );
-
-        return {'success': true, 'message': 'تم حذف الشيخ بنجاح'};
-      }, 'deleteSheikhByUniqueId');
-    } catch (e) {
-      developer.log(
-        'Delete sheikh by uniqueId error: $e',
-        name: 'LocalRepository',
-      );
-      return {'success': false, 'message': 'حدث خطأ أثناء حذف الشيخ: $e'};
-    }
-  }
-
   /// Create a sheikh in the sheikhs table
   /// uniqueId must be TEXT and exactly 8 digits
-  /// password is optional but will be hashed if provided
+  /// password is optional; if provided, passwordHash will be stored
   Future<Map<String, dynamic>> createSheikh({
     required String name,
     String? email,
@@ -1610,42 +1629,47 @@ class LocalRepository {
         final uidInput = (uniqueId ?? '').trim();
 
         // Validate uniqueId: must be TEXT, exactly 8 digits
-        if (uidInput.isNotEmpty) {
-          final normalized = uidInput.replaceAll(RegExp(r'[^0-9]'), '');
-          if (normalized.isEmpty) {
-            return {
-              'success': false,
-              'message': 'رقم الشيخ يجب أن يحتوي على أرقام فقط',
-            };
-          }
-          if (normalized.length != 8) {
-            return {
-              'success': false,
-              'message': 'رقم الشيخ يجب أن يكون 8 أرقام بالضبط',
-            };
-          }
-          // Use normalized 8-digit value
-          uniqueId = normalized;
-
-          // Check uniqueId uniqueness
-          final existing = await db.query(
-            'sheikhs',
-            where: 'uniqueId = ? AND isDeleted = 0',
-            whereArgs: [uniqueId],
-            limit: 1,
-          );
-          if (existing.isNotEmpty) {
-            return {'success': false, 'message': 'رقم الشيخ موجود مسبقاً'};
-          }
+        if (uidInput.isEmpty) {
+          return {'success': false, 'message': 'رقم الشيخ مطلوب'};
         }
 
-        // Normalize password (null-safe)
+        final normalized = uidInput.replaceAll(RegExp(r'[^0-9]'), '');
+        if (normalized.isEmpty) {
+          return {
+            'success': false,
+            'message': 'رقم الشيخ يجب أن يحتوي على أرقام فقط',
+          };
+        }
+        if (normalized.length != 8) {
+          return {
+            'success': false,
+            'message': 'رقم الشيخ يجب أن يكون 8 أرقام بالضبط',
+          };
+        }
+        // Use normalized 8-digit value
+        uniqueId = normalized;
+
+        // Check uniqueId uniqueness
+        final existing = await db.query(
+          'sheikhs',
+          where: 'uniqueId = ? AND isDeleted = 0',
+          whereArgs: [uniqueId],
+          limit: 1,
+        );
+        if (existing.isNotEmpty) {
+          return {'success': false, 'message': 'رقم الشيخ موجود مسبقاً'};
+        }
+
+        // Hash password if provided
+        String? passwordHash;
         final pwdInput = (password ?? '').trim();
-        final passwordHash = pwdInput.isNotEmpty ? sha256Hex(pwdInput) : null;
+        if (pwdInput.isNotEmpty) {
+          passwordHash = sha256Hex(pwdInput);
+        }
 
         final now = DateTime.now().millisecondsSinceEpoch;
         final insertedId = await db.insert('sheikhs', {
-          'uniqueId': uniqueId ?? '', // TEXT type - preserves leading zeros
+          'uniqueId': uniqueId, // TEXT type - preserves leading zeros
           'name': name,
           'email': email,
           'phone': phone,
@@ -1768,6 +1792,104 @@ class LocalRepository {
     } catch (e) {
       developer.log('Get all sheikhs error: $e', name: 'LocalRepository');
       return [];
+    }
+  }
+
+  /// Delete sheikh by uniqueId (soft delete) - returns rowsAffected
+  Future<Map<String, dynamic>> deleteSheikhByUniqueId(String uniqueId) async {
+    try {
+      return await _withRetry((db) async {
+        // Normalize uniqueId
+        final uidInput = uniqueId.trim();
+        if (uidInput.isEmpty) {
+          return {
+            'success': false,
+            'message': 'رقم الشيخ مطلوب',
+            'rowsAffected': 0,
+          };
+        }
+
+        final normalized = uidInput.replaceAll(RegExp(r'[^0-9]'), '');
+        if (normalized.length != 8) {
+          return {
+            'success': false,
+            'message': 'رقم الشيخ يجب أن يكون 8 أرقام بالضبط',
+            'rowsAffected': 0,
+          };
+        }
+
+        // First, find the sheikh to get name
+        final results = await db.query(
+          'sheikhs',
+          where: 'uniqueId = ? AND isDeleted = 0',
+          whereArgs: [normalized],
+          limit: 1,
+        );
+
+        if (results.isEmpty) {
+          return {
+            'success': false,
+            'message': 'لم يتم العثور على شيخ بهذا الرقم',
+            'rowsAffected': 0,
+          };
+        }
+
+        final sheikh = results.first;
+        final sheikhName = sheikh['name'] ?? 'غير محدد';
+        final sheikhId = sheikh['id']?.toString();
+
+        // Soft delete the sheikh - must affect exactly 1 row
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final rowsAffected = await db.update(
+          'sheikhs',
+          {'isDeleted': 1, 'updatedAt': now},
+          where: 'uniqueId = ? AND isDeleted = 0',
+          whereArgs: [normalized],
+        );
+
+        // Verify exactly 1 row was affected
+        if (rowsAffected != 1) {
+          developer.log(
+            'Delete sheikh: Expected 1 row affected, got $rowsAffected',
+            name: 'LocalRepository',
+          );
+          return {
+            'success': false,
+            'message': 'فشل في حذف الشيخ: لم يتم العثور على سجل واحد فقط',
+            'rowsAffected': rowsAffected,
+          };
+        }
+
+        // Archive all lectures by this sheikh's id if we have it
+        if (sheikhId != null) {
+          try {
+            await archiveLecturesBySheikh(sheikhId);
+          } catch (e) {
+            developer.log(
+              'Error archiving lectures for sheikh: $e',
+              name: 'LocalRepository',
+            );
+            // Continue even if archiving fails
+          }
+        }
+
+        return {
+          'success': true,
+          'message': 'تم حذف الشيخ وجميع محاضراته بنجاح',
+          'sheikhName': sheikhName,
+          'rowsAffected': rowsAffected, // Should be exactly 1
+        };
+      }, 'deleteSheikhByUniqueId');
+    } catch (e) {
+      developer.log(
+        'Delete sheikh by uniqueId error: $e',
+        name: 'LocalRepository',
+      );
+      return {
+        'success': false,
+        'message': 'حدث خطأ أثناء حذف الشيخ: $e',
+        'rowsAffected': 0,
+      };
     }
   }
 

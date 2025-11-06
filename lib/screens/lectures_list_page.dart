@@ -218,7 +218,7 @@ class _LecturesListPageState extends State<LecturesListPage> {
               Padding(
                 padding: const EdgeInsets.only(top: 8.0),
                 child: Text(
-                  lecture['description'],
+                  lecture['description']?.toString() ?? '',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: Colors.grey[600], fontSize: 14),
@@ -308,7 +308,7 @@ class _LecturesListPageState extends State<LecturesListPage> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            lecture['description'],
+                            lecture['description']?.toString() ?? '',
                             style: const TextStyle(fontSize: 14),
                           ),
                           const SizedBox(height: 16),
@@ -353,7 +353,10 @@ class _LecturesListPageState extends State<LecturesListPage> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            lecture['location']['label'] ?? 'غير محدد',
+                            (lecture['location']
+                                        as Map<String, dynamic>?)?['label']
+                                    ?.toString() ??
+                                'غير محدد',
                             style: const TextStyle(fontSize: 14),
                           ),
                           const SizedBox(height: 16),

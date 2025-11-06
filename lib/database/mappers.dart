@@ -1,13 +1,19 @@
 import 'package:new_project/offline/firestore_shims.dart';
-import 'package:new_project/utils/date_converter.dart';
 
 /// Mapper functions to convert data structures
 /// Works with both Firestore Timestamp shims and integer timestamps
 
 /// Convert timestamp (Timestamp or int) to milliseconds
-/// DEPRECATED: Use safeDateToEpochMsFromDynamic from date_converter.dart instead
 int? _timestampToMillis(dynamic timestamp) {
-  return safeDateToEpochMsFromDynamic(timestamp);
+  if (timestamp == null) return null;
+  if (timestamp is int) return timestamp;
+  if (timestamp is Timestamp) {
+    return timestamp.millisecondsSinceEpoch;
+  }
+  if (timestamp is DateTime) {
+    return timestamp.millisecondsSinceEpoch;
+  }
+  return null;
 }
 
 /// Convert Firestore user document to SQLite row
@@ -56,26 +62,51 @@ Map<String, dynamic> lectureDocToRow(String id, Map<String, dynamic> docData) {
       docData['media']?['videoPath'] ??
       docData['videoPath'];
 
+  // Normalize section key if it's Arabic
+  String? section = docData['section']?.toString();
+  if (section != null) {
+    switch (section.trim()) {
+      case 'الفقه':
+        section = 'fiqh';
+        break;
+      case 'الحديث':
+        section = 'hadith';
+        break;
+      case 'السيرة':
+        section = 'seerah';
+        break;
+      case 'التفسير':
+        section = 'tafsir';
+        break;
+      default:
+        section = section.trim().toLowerCase();
+    }
+  }
+
   return {
     'id': id,
-    'title': docData['title']?.toString(),
-    'description': docData['description']?.toString(),
-    'video_path': videoPath?.toString(),
-    'section': docData['section']?.toString(),
+    'title': docData['title']?.toString() ?? '',
+    'description': docData['description']?.toString() ?? '',
+    'video_path': videoPath?.toString() ?? '',
+    'section': section ?? 'unknown',
     'subcategory_id':
         docData['subcategoryId']?.toString() ??
-        docData['subcategory_id']?.toString(),
-    'categoryId': docData['categoryId']?.toString(),
-    'categoryName': docData['categoryName']?.toString(),
-    'subcategoryName': docData['subcategoryName']?.toString(),
-    'sheikhId': docData['sheikhId']?.toString(),
-    'sheikhName': docData['sheikhName']?.toString(),
+        docData['subcategory_id']?.toString() ??
+        '',
+    'categoryId': docData['categoryId']?.toString() ?? '',
+    'categoryName': docData['categoryName']?.toString() ?? '',
+    'subcategoryName': docData['subcategoryName']?.toString() ?? '',
+    'sheikhId': docData['sheikhId']?.toString() ?? '',
+    'sheikhName': docData['sheikhName']?.toString() ?? '',
     'startTime': _timestampToMillis(startTime),
     'endTime': _timestampToMillis(endTime),
     'status': docData['status']?.toString() ?? 'draft',
     'isPublished': (docData['isPublished'] == true) ? 1 : 0,
-    'created_at': _timestampToMillis(createdTimestamp),
-    'updated_at': _timestampToMillis(updatedTimestamp),
+    'isDeleted': (docData['isDeleted'] == true || docData['deletedAt'] != null)
+        ? 1
+        : 0,
+    'created_at': _timestampToMillis(createdTimestamp) ?? 0,
+    'updated_at': _timestampToMillis(updatedTimestamp) ?? 0,
     'archivedAt': _timestampToMillis(docData['archivedAt']),
     'deletedAt': _timestampToMillis(docData['deletedAt']),
   };

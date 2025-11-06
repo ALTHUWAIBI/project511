@@ -10,7 +10,7 @@ class AppDatabase {
   static Database? _database;
   static Future<void>? _initFuture;
   static const int _currentVersion =
-      4; // Bumped: Added categories table with section_id and indexes
+      8; // Bumped for isDeleted column and data normalization
   static const String _dbName = 'main_app.db'; // Single canonical DB file name
 
   AppDatabase._internal();
@@ -44,81 +44,29 @@ class AppDatabase {
       }
 
       final path = join(databasesPath, _dbName);
-      developer.log('[AppDatabase] Database path: $path');
 
-      // Open database normally first (no pre-check that could delete it)
-      try {
-        _database = await openDatabase(
-          path,
-          version: _currentVersion,
-          onConfigure: _onConfigure,
-          onCreate: _onCreate,
-          onUpgrade: _onUpgrade,
-          onDowngrade: _onDowngrade,
-          onOpen: _onOpen,
-          singleInstance: true,
-        );
+      // Check for corruption and backup if needed
+      await _handleCorruption(path);
 
-        // Run integrity check AFTER opening
-        await _verifyIntegrity(path);
+      _database = await openDatabase(
+        path,
+        version: _currentVersion,
+        onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
+        onDowngrade: _onDowngrade,
+        singleInstance: true,
+      );
 
-        // Ensure schema is applied
-        await _ensureSchema(_database!);
+      // Configure database
+      await _configureDatabase(_database!);
 
-        final dbVersion = await _database!.getVersion();
-        developer.log(
-          '[AppDatabase] Database initialized - path: $path, version: $dbVersion',
-        );
+      // Ensure schema is applied
+      await _ensureSchema(_database!);
 
-        // Log diagnostic information
-        await _logDiagnostics(_database!);
-      } on DatabaseException catch (openError) {
-        // If opening fails, check if it's corruption or just transient
-        developer.log('[AppDatabase] ⚠️ Database open error: $openError');
-
-        // Try integrity check on existing file
-        final file = File(path);
-        if (await file.exists()) {
-          final isCorrupted = await _checkIntegrityOnFile(path);
-          if (isCorrupted) {
-            developer.log(
-              '[AppDatabase] ⚠️ Corruption confirmed, backing up and recreating',
-            );
-            await _backupAndRecreate(path);
-
-            // Retry opening after recreation
-            _database = await openDatabase(
-              path,
-              version: _currentVersion,
-              onConfigure: _onConfigure,
-              onCreate: _onCreate,
-              onUpgrade: _onUpgrade,
-              onDowngrade: _onDowngrade,
-              onOpen: _onOpen,
-              singleInstance: true,
-            );
-            await _ensureSchema(_database!);
-            await _logDiagnostics(_database!);
-          } else {
-            // Transient error, rethrow
-            rethrow;
-          }
-        } else {
-          // File doesn't exist, let onCreate handle it
-          _database = await openDatabase(
-            path,
-            version: _currentVersion,
-            onConfigure: _onConfigure,
-            onCreate: _onCreate,
-            onUpgrade: _onUpgrade,
-            onDowngrade: _onDowngrade,
-            onOpen: _onOpen,
-            singleInstance: true,
-          );
-          await _ensureSchema(_database!);
-          await _logDiagnostics(_database!);
-        }
-      }
+      final dbVersion = await _readUserVersion(_database!);
+      developer.log(
+        '[AppDatabase] Database initialized - path: $path, user_version: $dbVersion',
+      );
     } catch (e, stackTrace) {
       developer.log(
         '[AppDatabase] ❌ Initialization failed: $e',
@@ -130,174 +78,159 @@ class AppDatabase {
     }
   }
 
-  /// Configure database with PRAGMA settings - called before onCreate/onUpgrade
-  Future<void> _onConfigure(Database db) async {
+  /// Configure database with PRAGMA settings
+  Future<void> _configureDatabase(Database db) async {
     try {
-      await db.execute('PRAGMA foreign_keys = ON');
+      await db.execute('PRAGMA foreign_keys=ON;');
       developer.log('[AppDatabase] Foreign keys enabled');
     } catch (e) {
       developer.log('[AppDatabase] ⚠️ Could not enable foreign keys: $e');
     }
 
     try {
-      await db.execute('PRAGMA journal_mode = WAL');
+      await db.execute('PRAGMA journal_mode=WAL;');
       developer.log('[AppDatabase] WAL mode enabled');
     } catch (e) {
       developer.log('[AppDatabase] ⚠️ Could not enable WAL mode: $e');
     }
 
     try {
-      await db.execute('PRAGMA synchronous = NORMAL');
+      await db.execute('PRAGMA synchronous=NORMAL;');
     } catch (e) {
       developer.log('[AppDatabase] ⚠️ Could not set synchronous mode: $e');
     }
   }
 
-  /// Verify database integrity using PRAGMA quick_check
-  /// Returns true if database is healthy
-  Future<void> _verifyIntegrity(String path) async {
+  /// Read user_version from database using PRAGMA
+  Future<int> _readUserVersion(Database db) async {
     try {
-      if (_database == null) return;
-
-      final result = await _database!.rawQuery('PRAGMA quick_check');
-      final checkResult = result.first['quick_check'] as String?;
-
-      if (checkResult == 'ok') {
-        developer.log('[AppDatabase] ✅ Integrity check: ok');
-      } else {
-        developer.log('[AppDatabase] ⚠️ Integrity check failed: $checkResult');
-        throw Exception('Database integrity check failed: $checkResult');
-      }
+      final result = await db.rawQuery('PRAGMA user_version');
+      return Sqflite.firstIntValue(result) ?? 0;
     } catch (e) {
-      developer.log('[AppDatabase] Integrity check error: $e');
+      developer.log('[AppDatabase] ⚠️ Could not read user_version: $e');
+      return 0;
+    }
+  }
+
+  /// Set user_version in database using PRAGMA
+  Future<void> _setUserVersion(Database db, int version) async {
+    try {
+      await db.execute('PRAGMA user_version = $version');
+      developer.log('[AppDatabase] Set user_version to $version');
+    } catch (e) {
+      developer.log('[AppDatabase] ⚠️ Could not set user_version: $e');
       rethrow;
     }
   }
 
-  /// Check integrity on an existing file (before opening)
-  /// Returns true if file is corrupted
-  Future<bool> _checkIntegrityOnFile(String path) async {
-    try {
-      // Try to open read-only and run quick_check
-      final testDb = await openDatabase(
-        path,
-        version: 1,
-        readOnly: true,
-        singleInstance: false,
-      );
-      try {
-        final result = await testDb.rawQuery('PRAGMA quick_check');
-        final checkResult = result.first['quick_check'] as String?;
-        await testDb.close();
-        return checkResult != 'ok';
-      } catch (e) {
-        await testDb.close();
-        developer.log('[AppDatabase] Integrity check failed: $e');
-        return true; // Assume corrupted if check fails
-      }
-    } catch (e) {
-      developer.log('[AppDatabase] Could not check integrity: $e');
-      // If we can't open it at all, assume it might be corrupted
-      // But don't delete it - let the normal open attempt handle it
-      return false; // Don't delete on transient errors
-    }
-  }
-
-  /// Backup and recreate database after confirmed corruption
-  Future<void> _backupAndRecreate(String path) async {
-    try {
-      final file = File(path);
-      if (await file.exists()) {
-        final backupPath = '$path.bak.${DateTime.now().millisecondsSinceEpoch}';
-        await file.copy(backupPath);
-        developer.log('[AppDatabase] Backup created: $backupPath');
-
-        // Delete main DB file (WAL and SHM will be recreated automatically)
-        await file.delete();
-        developer.log('[AppDatabase] Corrupted database deleted');
-
-        // Delete WAL and SHM files if they exist
-        final walFile = File('$path-wal');
-        final shmFile = File('$path-shm');
-        if (await walFile.exists()) {
-          try {
-            await walFile.delete();
-          } catch (_) {
-            // Ignore errors deleting WAL file
-          }
-        }
-        if (await shmFile.exists()) {
-          try {
-            await shmFile.delete();
-          } catch (_) {
-            // Ignore errors deleting SHM file
-          }
-        }
-      }
-    } catch (backupError) {
-      developer.log('[AppDatabase] ⚠️ Could not create backup: $backupError');
-      throw Exception('Failed to backup corrupted database: $backupError');
-    }
-  }
-
-  /// Log diagnostic information about the database
-  Future<void> _logDiagnostics(Database db) async {
-    try {
-      final path = await getDatabasePath();
-      developer.log('[AppDatabase] 📊 Diagnostics - Path: $path');
-
-      final version = await db.getVersion();
-      developer.log('[AppDatabase] 📊 Diagnostics - Version: $version');
-
-      // Get table counts
-      final tables = [
-        'users',
-        'lectures',
-        'sheikhs',
-        'categories',
-        'subcategories',
-      ];
-      final counts = <String, int>{};
-
-      for (final table in tables) {
-        try {
-          final result = await db.rawQuery(
-            'SELECT COUNT(*) as count FROM $table',
-          );
-          counts[table] = Sqflite.firstIntValue(result) ?? 0;
-        } catch (e) {
-          // Table might not exist yet
-          counts[table] = 0;
-        }
-      }
-
+  /// Handle potential database corruption - Non-destructive integrity check
+  /// Only deletes database if PRAGMA quick_check fails twice consecutively
+  Future<void> _handleCorruption(String path) async {
+    final file = File(path);
+    if (!await file.exists()) {
       developer.log(
-        '[AppDatabase] 📊 Diagnostics - Table counts: ${counts.toString()}',
+        '[AppDatabase] Database file does not exist - will be created on first use',
+      );
+      return;
+    }
+
+    developer.log('[AppDatabase] Checking database integrity | path: $path');
+
+    // Perform read-only integrity check using PRAGMA quick_check
+    // This is safer than opening with version callbacks which can trigger migrations
+    Database? testDb;
+    try {
+      // Open database WITHOUT version/onCreate/onUpgrade to prevent accidental reinitialization
+      testDb = await openDatabase(
+        path,
+        readOnly: true,
+        singleInstance: false, // Use separate instance for integrity check
       );
 
-      // Check WAL mode
-      try {
-        final walResult = await db.rawQuery('PRAGMA journal_mode');
-        final journalMode = walResult.first['journal_mode'] as String?;
-        developer.log(
-          '[AppDatabase] 📊 Diagnostics - Journal mode: $journalMode',
-        );
-      } catch (e) {
-        developer.log('[AppDatabase] Could not check journal mode: $e');
-      }
+      // Use PRAGMA quick_check for integrity verification
+      final integrityResult = await testDb.rawQuery('PRAGMA quick_check');
+      final result = integrityResult.first['quick_check'] as String?;
 
-      // Check foreign keys
-      try {
-        final fkResult = await db.rawQuery('PRAGMA foreign_keys');
-        final foreignKeys = Sqflite.firstIntValue(fkResult) ?? 0;
+      if (result == 'ok') {
         developer.log(
-          '[AppDatabase] 📊 Diagnostics - Foreign keys: ${foreignKeys == 1 ? "ON" : "OFF"}',
+          '[AppDatabase] ✅ Integrity check passed - database is healthy',
         );
-      } catch (e) {
-        developer.log('[AppDatabase] Could not check foreign keys: $e');
+        await testDb.close();
+
+        // Clear any existing corruption marker since database is healthy
+        final failureMarkerPath = '$path.corruption_marker';
+        final failureMarker = File(failureMarkerPath);
+        if (await failureMarker.exists()) {
+          await failureMarker.delete();
+          developer.log(
+            '[AppDatabase] Cleared corruption marker - database is healthy',
+          );
+        }
+
+        return; // Database is healthy, no action needed
+      } else {
+        developer.log('[AppDatabase] ⚠️ Integrity check failed: $result');
+        await testDb.close();
+        throw Exception('Database integrity check failed: $result');
       }
     } catch (e) {
-      developer.log('[AppDatabase] Diagnostic logging error: $e');
+      if (testDb != null) {
+        try {
+          await testDb.close();
+        } catch (_) {
+          // Ignore close errors
+        }
+      }
+
+      // First failure - log but don't delete yet
+      developer.log(
+        '[AppDatabase] ⚠️ First integrity check failed: $e | Will retry on next startup if issue persists',
+      );
+
+      // Check for previous failure marker (stored in a separate file)
+      final failureMarkerPath = '$path.corruption_marker';
+      final failureMarker = File(failureMarkerPath);
+
+      if (await failureMarker.exists()) {
+        // Second consecutive failure - database is truly corrupted
+        developer.log(
+          '[AppDatabase] ❌ Second consecutive integrity failure - database is corrupted',
+        );
+
+        try {
+          // Create backup before deletion
+          final backupPath =
+              '$path.bak.${DateTime.now().millisecondsSinceEpoch}';
+          await file.copy(backupPath);
+          developer.log('[AppDatabase] Backup created: $backupPath');
+
+          // Delete corrupted database
+          await file.delete();
+          developer.log('[AppDatabase] Corrupted database deleted');
+
+          // Remove failure marker
+          if (await failureMarker.exists()) {
+            await failureMarker.delete();
+          }
+        } catch (backupError) {
+          developer.log(
+            '[AppDatabase] ❌ Could not create backup or delete corrupted database: $backupError',
+          );
+          rethrow;
+        }
+      } else {
+        // First failure - create marker for next startup
+        try {
+          await failureMarker.writeAsString(
+            DateTime.now().millisecondsSinceEpoch.toString(),
+          );
+          developer.log(
+            '[AppDatabase] Created corruption marker - will verify again on next startup',
+          );
+        } catch (_) {
+          // Ignore marker creation errors
+        }
+      }
     }
   }
 
@@ -307,6 +240,8 @@ class AppDatabase {
       await _migrationV1(db);
       developer.log('[AppDatabase] Initial schema created (v1)');
     });
+    // Set user_version after initial creation
+    await _setUserVersion(db, version);
   }
 
   /// Database upgrade handler
@@ -331,6 +266,18 @@ class AppDatabase {
           case 4:
             await _migrationV4(db);
             break;
+          case 5:
+            await _migrationV5(db);
+            break;
+          case 6:
+            await _migrationV6(db);
+            break;
+          case 7:
+            await _migrationV7(db);
+            break;
+          case 8:
+            await _migrationV8(db);
+            break;
           default:
             developer.log(
               '[AppDatabase] ⚠️ Unknown migration version: $version',
@@ -339,7 +286,12 @@ class AppDatabase {
       }
     });
 
-    developer.log('[AppDatabase] Upgrade completed');
+    // Set user_version after successful migration
+    await _setUserVersion(db, newVersion);
+
+    developer.log(
+      '[AppDatabase] Upgrade completed - user_version set to $newVersion',
+    );
   }
 
   /// Database downgrade handler (should not happen in production)
@@ -350,18 +302,6 @@ class AppDatabase {
     throw Exception(
       'Database downgrade not supported. Current version: $oldVersion, requested: $newVersion',
     );
-  }
-
-  /// Database opened callback - enforce foreign keys
-  Future<void> _onOpen(Database db) async {
-    try {
-      await db.execute('PRAGMA foreign_keys = ON');
-      developer.log('[AppDatabase] Foreign keys enabled in onOpen');
-    } catch (e) {
-      developer.log(
-        '[AppDatabase] ⚠️ Could not enable foreign keys in onOpen: $e',
-      );
-    }
   }
 
   /// Migration v1: Initial schema with all critical tables
@@ -405,27 +345,6 @@ class AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_subcats_section ON subcategories(section)',
     );
 
-    // Categories table
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS categories (
-        id TEXT PRIMARY KEY,
-        section_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        description TEXT,
-        sortOrder INTEGER DEFAULT 0,
-        isDeleted INTEGER NOT NULL DEFAULT 0,
-        createdAt INTEGER,
-        updatedAt INTEGER
-      )
-    ''');
-
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_categories_section ON categories(section_id)',
-    );
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_categories_isDeleted ON categories(isDeleted)',
-    );
-
     // Lectures table
     await db.execute('''
       CREATE TABLE IF NOT EXISTS lectures (
@@ -460,11 +379,11 @@ class AppDatabase {
     );
 
     // Sheikhs table - CRITICAL: Must be in v1 for fresh installs
-    // This is the SINGLE SOURCE OF TRUTH for all sheikh operations
+    // uniqueId is TEXT(8) - exactly 8 digits, enforced by CHECK constraint
     await db.execute('''
       CREATE TABLE IF NOT EXISTS sheikhs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        uniqueId TEXT NOT NULL UNIQUE,
+        uniqueId TEXT NOT NULL UNIQUE CHECK(LENGTH(uniqueId) = 8 AND uniqueId GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
         name TEXT NOT NULL,
         email TEXT,
         phone TEXT,
@@ -544,123 +463,419 @@ class AppDatabase {
     developer.log('[AppDatabase] Migration v2 applied (no changes needed)');
   }
 
-  /// Migration V3: Add passwordHash to sheikhs table and backfill from users
-  /// This unifies sheikh operations to use sheikhs table as single source of truth
+  /// Migration v3: Add passwordHash to sheikhs and backfill from users
   Future<void> _migrationV3(Database db) async {
-    developer.log('[AppDatabase] Applying migration V3: Unified sheikh schema');
+    developer.log(
+      '[AppDatabase] Applying migration v3: sheikhs passwordHash + backfill',
+    );
 
+    // Add passwordHash column if it doesn't exist
     try {
-      // Add passwordHash column if it doesn't exist
-      // SQLite doesn't support IF NOT EXISTS for ALTER TABLE ADD COLUMN
-      // So we check if column exists first
-      try {
-        await db.execute('ALTER TABLE sheikhs ADD COLUMN passwordHash TEXT');
-        developer.log('[AppDatabase] Added passwordHash column to sheikhs');
-      } catch (e) {
-        // Column might already exist, ignore
-        if (e.toString().contains('duplicate column')) {
-          developer.log('[AppDatabase] passwordHash column already exists');
+      await db.execute('ALTER TABLE sheikhs ADD COLUMN passwordHash TEXT');
+      developer.log('[AppDatabase] Added passwordHash column to sheikhs');
+    } catch (e) {
+      // Column might already exist, ignore
+      developer.log('[AppDatabase] passwordHash column may already exist: $e');
+    }
+
+    // Update createdAt/updatedAt to INTEGER if they're TEXT
+    try {
+      // Check if columns are TEXT by trying to read a sample
+      final sample = await db.query('sheikhs', limit: 1);
+      if (sample.isNotEmpty) {
+        final createdAt = sample.first['createdAt'];
+        // If createdAt is a string, we need to convert existing data
+        if (createdAt is String) {
+          developer.log(
+            '[AppDatabase] Converting sheikhs timestamps from TEXT to INTEGER',
+          );
+          // For existing rows, convert ISO8601 strings to milliseconds
+          final allSheikhs = await db.query('sheikhs');
+          for (final sheikh in allSheikhs) {
+            final id = sheikh['id'];
+            int? createdAtMs;
+            int? updatedAtMs;
+
+            try {
+              if (sheikh['createdAt'] is String) {
+                final dateStr = sheikh['createdAt'] as String;
+                final date = DateTime.parse(dateStr);
+                createdAtMs = date.millisecondsSinceEpoch;
+              } else {
+                createdAtMs = sheikh['createdAt'] as int?;
+              }
+            } catch (_) {
+              createdAtMs = DateTime.now().millisecondsSinceEpoch;
+            }
+
+            try {
+              if (sheikh['updatedAt'] is String) {
+                final dateStr = sheikh['updatedAt'] as String;
+                final date = DateTime.parse(dateStr);
+                updatedAtMs = date.millisecondsSinceEpoch;
+              } else {
+                updatedAtMs = sheikh['updatedAt'] as int?;
+              }
+            } catch (_) {
+              updatedAtMs = DateTime.now().millisecondsSinceEpoch;
+            }
+
+            await db.update(
+              'sheikhs',
+              {
+                'createdAt':
+                    createdAtMs ?? DateTime.now().millisecondsSinceEpoch,
+                'updatedAt':
+                    updatedAtMs ?? DateTime.now().millisecondsSinceEpoch,
+              },
+              where: 'id = ?',
+              whereArgs: [id],
+            );
+          }
+        }
+      }
+    } catch (e) {
+      developer.log('[AppDatabase] Could not convert timestamps: $e');
+    }
+
+    // Backfill sheikhs from users table (if users with role='sheikh' exist)
+    try {
+      final usersWithSheikhRole = await db.query(
+        'users',
+        where: 'role = ? AND uniqueId IS NOT NULL',
+        whereArgs: ['sheikh'],
+      );
+
+      int backfilled = 0;
+      for (final user in usersWithSheikhRole) {
+        final uniqueId = user['uniqueId'] as String?;
+        if (uniqueId == null || uniqueId.isEmpty) continue;
+
+        // Normalize to 8 digits
+        final normalized = uniqueId.trim().replaceAll(RegExp(r'[^0-9]'), '');
+        if (normalized.length != 8) continue;
+
+        // Check if sheikh already exists
+        final existing = await db.query(
+          'sheikhs',
+          where: 'uniqueId = ?',
+          whereArgs: [normalized],
+          limit: 1,
+        );
+
+        if (existing.isEmpty) {
+          // Insert into sheikhs table
+          final now = DateTime.now().millisecondsSinceEpoch;
+          await db.insert('sheikhs', {
+            'uniqueId': normalized,
+            'name': user['name'] ?? 'غير محدد',
+            'email': user['email'],
+            'phone': user['phone'],
+            'category': user['category'],
+            'passwordHash': user['password_hash'],
+            'createdAt': now,
+            'updatedAt': now,
+            'isDeleted': 0,
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
+          backfilled++;
         } else {
-          rethrow;
+          // Update existing sheikh with passwordHash if missing
+          final existingSheikh = existing.first;
+          if (existingSheikh['passwordHash'] == null &&
+              user['password_hash'] != null) {
+            await db.update(
+              'sheikhs',
+              {'passwordHash': user['password_hash']},
+              where: 'id = ?',
+              whereArgs: [existingSheikh['id']],
+            );
+            backfilled++;
+          }
         }
       }
 
-      // Add index on isDeleted if not exists
-      try {
-        await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_sheikhs_isDeleted ON sheikhs(isDeleted)',
-        );
-      } catch (e) {
+      if (backfilled > 0) {
         developer.log(
-          '[AppDatabase] Index on isDeleted might already exist: $e',
+          '[AppDatabase] Backfilled $backfilled sheikh(s) from users table',
         );
+      } else {
+        developer.log('[AppDatabase] No sheikhs to backfill from users table');
+      }
+    } catch (e) {
+      developer.log('[AppDatabase] Error during backfill: $e');
+      // Continue - backfill is non-critical
+    }
+
+    developer.log('[AppDatabase] Migration v3 completed');
+  }
+
+  /// Migration v4: Verify sheikhs uniqueId integrity and enforce 8-digit constraint
+  /// Note: SQLite doesn't support ALTER TABLE ADD CONSTRAINT, so we verify data integrity
+  /// The CHECK constraint is applied on new table creation (v1)
+  Future<void> _migrationV4(Database db) async {
+    developer.log(
+      '[AppDatabase] Applying migration v4: Verify sheikhs uniqueId integrity',
+    );
+
+    try {
+      // Verify all existing uniqueId values are exactly 8 digits
+      final allSheikhs = await db.query('sheikhs');
+      int corrected = 0;
+
+      for (final sheikh in allSheikhs) {
+        final uniqueId = sheikh['uniqueId'] as String?;
+        if (uniqueId == null) continue;
+
+        // Normalize to 8 digits
+        final normalized = uniqueId.replaceAll(RegExp(r'[^0-9]'), '');
+        if (normalized.length != 8) {
+          developer.log(
+            '[AppDatabase] ⚠️ Invalid uniqueId found: $uniqueId (id: ${sheikh['id']})',
+          );
+          // Skip correction - let application handle invalid data
+          continue;
+        }
+
+        // If uniqueId needs normalization, update it
+        if (uniqueId != normalized) {
+          final id = sheikh['id'];
+          try {
+            await db.update(
+              'sheikhs',
+              {
+                'uniqueId': normalized,
+                'updatedAt': DateTime.now().millisecondsSinceEpoch,
+              },
+              where: 'id = ?',
+              whereArgs: [id],
+            );
+            corrected++;
+          } catch (e) {
+            developer.log(
+              '[AppDatabase] Could not normalize uniqueId for id $id: $e',
+            );
+          }
+        }
       }
 
-      // Backfill from users table to sheikhs table
-      // Find all users with role='sheikh' and uniqueId, migrate them to sheikhs
-      try {
-        final usersWithSheikhRole = await db.rawQuery('''
-          SELECT id, uniqueId, name, email, password_hash, created_at, updated_at
-          FROM users
-          WHERE role = 'sheikh' AND uniqueId IS NOT NULL AND uniqueId != ''
-        ''');
+      if (corrected > 0) {
+        developer.log(
+          '[AppDatabase] Normalized $corrected sheikh uniqueId(s) to 8 digits',
+        );
+      } else {
+        developer.log(
+          '[AppDatabase] All sheikh uniqueIds are valid (8 digits)',
+        );
+      }
+    } catch (e) {
+      developer.log('[AppDatabase] Error during v4 migration: $e');
+      // Continue - verification is non-critical
+    }
 
-        int backfilledCount = 0;
-        for (final user in usersWithSheikhRole) {
-          final uniqueId = user['uniqueId'] as String?;
-          if (uniqueId == null || uniqueId.isEmpty) continue;
+    developer.log('[AppDatabase] Migration v4 completed');
+  }
 
-          // Normalize uniqueId to 8 digits
-          final normalized = uniqueId.trim().replaceAll(RegExp(r'[^0-9]'), '');
-          if (normalized.length != 8) continue;
+  /// Migration v5: One-time backfill from users table to sheikhs table
+  /// Idempotent: safe to run multiple times (uses INSERT OR IGNORE)
+  Future<void> _migrationV5(Database db) async {
+    developer.log(
+      '[AppDatabase] Applying migration v5: Backfill sheikhs from users table',
+    );
 
-          // Check if sheikh already exists
-          final existing = await db.query(
-            'sheikhs',
-            where: 'uniqueId = ?',
-            whereArgs: [normalized],
-            limit: 1,
+    try {
+      // Check if users table exists and has sheikhs
+      final usersWithSheikhRole = await db.query(
+        'users',
+        where: 'role = ? AND uniqueId IS NOT NULL AND uniqueId != ?',
+        whereArgs: ['sheikh', ''],
+      );
+
+      if (usersWithSheikhRole.isEmpty) {
+        developer.log(
+          '[AppDatabase] No sheikhs found in users table to backfill',
+        );
+        return;
+      }
+
+      int backfilled = 0;
+      int updated = 0;
+
+      for (final user in usersWithSheikhRole) {
+        final uniqueId = user['uniqueId'] as String?;
+        if (uniqueId == null || uniqueId.isEmpty) continue;
+
+        // Normalize to 8 digits
+        final normalized = uniqueId.trim().replaceAll(RegExp(r'[^0-9]'), '');
+        if (normalized.length != 8) {
+          developer.log(
+            '[AppDatabase] Skipping invalid uniqueId: $uniqueId (not 8 digits)',
           );
+          continue;
+        }
 
-          if (existing.isEmpty) {
-            // Insert into sheikhs table
-            final createdAtValue = user['created_at'];
-            final createdAt = createdAtValue is int
-                ? createdAtValue
-                : (createdAtValue is String
-                      ? int.tryParse(createdAtValue) ??
-                            DateTime.now().millisecondsSinceEpoch
-                      : DateTime.now().millisecondsSinceEpoch);
-            final updatedAtValue = user['updated_at'];
-            final updatedAt = updatedAtValue is int
-                ? updatedAtValue
-                : (updatedAtValue is String
-                      ? int.tryParse(updatedAtValue) ??
-                            DateTime.now().millisecondsSinceEpoch
-                      : DateTime.now().millisecondsSinceEpoch);
+        // Check if sheikh already exists in sheikhs table
+        final existing = await db.query(
+          'sheikhs',
+          where: 'uniqueId = ?',
+          whereArgs: [normalized],
+          limit: 1,
+        );
 
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final passwordHash = user['password_hash'] as String?;
+
+        if (existing.isEmpty) {
+          // Insert new sheikh from users table
+          try {
             await db.insert('sheikhs', {
               'uniqueId': normalized,
               'name': user['name'] ?? 'غير محدد',
               'email': user['email'],
-              'passwordHash': user['password_hash'],
-              'createdAt': createdAt,
-              'updatedAt': updatedAt,
+              'phone': user['phone'],
+              'category': user['category'],
+              'passwordHash': passwordHash,
+              'createdAt': user['created_at'] ?? now,
+              'updatedAt': user['updated_at'] ?? now,
               'isDeleted': 0,
             }, conflictAlgorithm: ConflictAlgorithm.ignore);
-            backfilledCount++;
+            backfilled++;
+          } catch (e) {
+            developer.log(
+              '[AppDatabase] Error inserting sheikh $normalized: $e',
+            );
+          }
+        } else {
+          // Update existing sheikh with passwordHash if missing
+          final existingSheikh = existing.first;
+          if (existingSheikh['passwordHash'] == null && passwordHash != null) {
+            await db.update(
+              'sheikhs',
+              {'passwordHash': passwordHash, 'updatedAt': now},
+              where: 'id = ?',
+              whereArgs: [existingSheikh['id']],
+            );
+            updated++;
+          }
+        }
+      }
+
+      if (backfilled > 0 || updated > 0) {
+        developer.log(
+          '[AppDatabase] Backfill completed: $backfilled inserted, $updated updated',
+        );
+      } else {
+        developer.log('[AppDatabase] No sheikhs needed backfilling');
+      }
+    } catch (e) {
+      developer.log('[AppDatabase] Error during v5 backfill: $e');
+      // Continue - backfill is non-critical
+    }
+
+    developer.log('[AppDatabase] Migration v5 completed');
+  }
+
+  /// Migration v6: Normalize lecture section keys and backfill publish flags
+  /// - Maps Arabic section names (الفقه, etc.) to canonical keys (fiqh, etc.)
+  /// - Sets isPublished=1 and status='published' for existing lectures that should be visible
+  Future<void> _migrationV6(Database db) async {
+    developer.log(
+      '[AppDatabase] Applying migration v6: Normalize lecture sections and backfill publish flags',
+    );
+
+    try {
+      // Get all lectures
+      final allLectures = await db.query('lectures');
+
+      int normalizedSections = 0;
+      int publishedLectures = 0;
+
+      for (final lecture in allLectures) {
+        final id = lecture['id'] as String;
+        final section = lecture['section'] as String?;
+        final isPublished = (lecture['isPublished'] as int? ?? 0) == 1;
+        final status = lecture['status'] as String? ?? 'draft';
+
+        // Normalize section key
+        String? normalizedSection;
+        if (section != null) {
+          switch (section.trim()) {
+            case 'الفقه':
+              normalizedSection = 'fiqh';
+              break;
+            case 'الحديث':
+              normalizedSection = 'hadith';
+              break;
+            case 'السيرة':
+              normalizedSection = 'seerah';
+              break;
+            case 'التفسير':
+              normalizedSection = 'tafsir';
+              break;
+            case 'fiqh':
+            case 'hadith':
+            case 'seerah':
+            case 'tafsir':
+              normalizedSection = section.trim();
+              break;
+            default:
+              normalizedSection = section.trim().toLowerCase();
+          }
+
+          if (normalizedSection != section) {
+            await db.update(
+              'lectures',
+              {'section': normalizedSection},
+              where: 'id = ?',
+              whereArgs: [id],
+            );
+            normalizedSections++;
           }
         }
 
-        if (backfilledCount > 0) {
-          developer.log(
-            '[AppDatabase] Backfilled $backfilledCount sheikhs from users table',
-          );
-        } else {
-          developer.log(
-            '[AppDatabase] No sheikhs to backfill from users table',
-          );
+        // Backfill publish flags: if lecture is not archived/deleted and has content,
+        // set it to published
+        if (status != 'archived' &&
+            status != 'deleted' &&
+            (!isPublished || status == 'draft')) {
+          final title = lecture['title'] as String?;
+          if (title != null && title.isNotEmpty) {
+            await db.update(
+              'lectures',
+              {'isPublished': 1, 'status': 'published'},
+              where: 'id = ?',
+              whereArgs: [id],
+            );
+            publishedLectures++;
+          }
         }
-      } catch (e) {
-        developer.log(
-          '[AppDatabase] ⚠️ Error during backfill: $e - continuing',
-        );
-        // Don't fail migration if backfill fails
       }
 
-      developer.log('[AppDatabase] Migration V3 completed');
+      if (normalizedSections > 0 || publishedLectures > 0) {
+        developer.log(
+          '[AppDatabase] Migration v6: Normalized $normalizedSections section(s), published $publishedLectures lecture(s)',
+        );
+      } else {
+        developer.log('[AppDatabase] Migration v6: No changes needed');
+      }
     } catch (e) {
-      developer.log('[AppDatabase] ⚠️ Migration V3 error: $e');
-      rethrow;
+      developer.log('[AppDatabase] Error during v6 migration: $e');
+      // Continue - migration is non-critical
     }
+
+    developer.log('[AppDatabase] Migration v6 completed');
   }
 
-  /// Migration V4: Add categories table with section_id and indexes
-  Future<void> _migrationV4(Database db) async {
-    developer.log('[AppDatabase] Applying migration V4: Categories table');
+  /// Migration v7: Create categories table
+  /// Categories are organized by section (fiqh, hadith, tafsir, seerah)
+  Future<void> _migrationV7(Database db) async {
+    developer.log(
+      '[AppDatabase] Applying migration v7: Create categories table',
+    );
 
     try {
-      // Create categories table if not exists
+      // Create categories table
+      // Note: section_id is TEXT to match current section representation (fiqh, hadith, etc.)
+      // This can be changed to INTEGER with a sections lookup table in a future migration
       await db.execute('''
         CREATE TABLE IF NOT EXISTS categories (
           id TEXT PRIMARY KEY,
@@ -669,40 +884,122 @@ class AppDatabase {
           description TEXT,
           sortOrder INTEGER DEFAULT 0,
           isDeleted INTEGER NOT NULL DEFAULT 0,
-          createdAt INTEGER,
-          updatedAt INTEGER
+          createdAt INTEGER NOT NULL,
+          updatedAt INTEGER NOT NULL
         )
       ''');
 
       // Create indexes
-      try {
-        await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_categories_section ON categories(section_id)',
-        );
-        await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_categories_isDeleted ON categories(isDeleted)',
-        );
-        developer.log('[AppDatabase] Categories indexes created');
-      } catch (e) {
-        developer.log('[AppDatabase] ⚠️ Index creation might have failed: $e');
-      }
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_categories_section ON categories(section_id)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_categories_isDeleted ON categories(isDeleted)',
+      );
 
-      developer.log('[AppDatabase] Migration V4 completed');
+      developer.log('[AppDatabase] Categories table created with indexes');
     } catch (e) {
-      developer.log('[AppDatabase] ⚠️ Migration V4 error: $e');
+      developer.log('[AppDatabase] Error during v7 migration: $e');
       rethrow;
     }
+
+    developer.log('[AppDatabase] Migration v7 completed');
+  }
+
+  /// Migration v8: Add isDeleted column to lectures and normalize data
+  /// - Adds isDeleted column (default 0)
+  /// - Normalizes Arabic section names to canonical keys
+  /// - Sets isPublished=1, status='published', isDeleted=0 for approved lectures
+  Future<void> _migrationV8(Database db) async {
+    developer.log(
+      '[AppDatabase] Applying migration v8: Add isDeleted column and normalize data',
+    );
+
+    try {
+      // Add isDeleted column if it doesn't exist
+      try {
+        await db.execute(
+          'ALTER TABLE lectures ADD COLUMN isDeleted INTEGER NOT NULL DEFAULT 0',
+        );
+        developer.log('[AppDatabase] Added isDeleted column to lectures');
+      } catch (e) {
+        // Column may already exist, check first
+        final columns = await db.rawQuery("PRAGMA table_info(lectures)");
+        final hasIsDeleted = columns.any((col) => col['name'] == 'isDeleted');
+        if (!hasIsDeleted) {
+          developer.log('[AppDatabase] Error adding isDeleted column: $e');
+          rethrow;
+        } else {
+          developer.log('[AppDatabase] isDeleted column already exists');
+        }
+      }
+
+      // Create index on isDeleted
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_lectures_isDeleted ON lectures(isDeleted)',
+      );
+
+      // Normalize section values: Arabic → canonical keys
+      final sectionMap = {
+        'الفقه': 'fiqh',
+        'الحديث': 'hadith',
+        'السيرة': 'seerah',
+        'التفسير': 'tafsir',
+      };
+
+      int normalizedSections = 0;
+      for (final entry in sectionMap.entries) {
+        final result = await db.rawUpdate(
+          "UPDATE lectures SET section = ? WHERE section = ?",
+          [entry.value, entry.key],
+        );
+        if (result > 0) {
+          normalizedSections += result;
+        }
+      }
+
+      // For lectures with status='published' or isPublished=1, ensure consistency
+      // Set isPublished=1, status='published', isDeleted=0
+      final publishedResult = await db.rawUpdate(
+        "UPDATE lectures SET isPublished = 1, status = 'published', isDeleted = 0 WHERE (isPublished = 1 OR status = 'published') AND (isDeleted IS NULL OR isDeleted = 0)",
+      );
+
+      // For archived lectures, ensure isPublished=0, isDeleted=0
+      await db.rawUpdate(
+        "UPDATE lectures SET isPublished = 0, isDeleted = 0 WHERE status = 'archived' AND (isDeleted IS NULL OR isDeleted = 0)",
+      );
+
+      // For deleted lectures, set isDeleted=1
+      await db.rawUpdate(
+        "UPDATE lectures SET isDeleted = 1 WHERE status = 'deleted'",
+      );
+
+      developer.log(
+        '[AppDatabase] Migration v8: Normalized $normalizedSections section(s), updated $publishedResult published lecture(s)',
+      );
+    } catch (e) {
+      developer.log('[AppDatabase] Error during v8 migration: $e');
+      rethrow;
+    }
+
+    developer.log('[AppDatabase] Migration v8 completed');
   }
 
   /// Ensure schema is applied - used for defensive retry
   Future<void> _ensureSchema(Database db) async {
     try {
-      final currentVersion = await db.getVersion();
+      // Use PRAGMA user_version instead of getVersion()
+      final currentVersion = await _readUserVersion(db);
       if (currentVersion < _currentVersion) {
         developer.log(
-          '[AppDatabase] Schema version mismatch - applying migrations',
+          '[AppDatabase] Schema version mismatch - applying migrations (current: $currentVersion, target: $_currentVersion)',
         );
         await _onUpgrade(db, currentVersion, _currentVersion);
+      } else if (currentVersion > _currentVersion) {
+        developer.log(
+          '[AppDatabase] ⚠️ Database version ($currentVersion) is newer than app version ($_currentVersion)',
+        );
+        // Don't downgrade - just log warning
       }
 
       // Verify critical tables exist

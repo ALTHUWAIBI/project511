@@ -6,6 +6,7 @@ import 'package:new_project/provider/hierarchy_provider.dart';
 import 'package:new_project/widgets/sheikh_guard.dart';
 import 'package:new_project/utils/youtube_utils.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
+import 'dart:developer' as developer;
 
 class AddLectureForm extends StatefulWidget {
   const AddLectureForm({super.key});
@@ -38,9 +39,6 @@ class _AddLectureFormState extends State<AddLectureForm> {
   String? _selectedCategoryName;
   String? _selectedSubcategoryId;
   String? _selectedSubcategoryName;
-  bool _isLoadingCats = false;
-
-  String? _lastSectionId;
 
   @override
   void initState() {
@@ -51,18 +49,7 @@ class _AddLectureFormState extends State<AddLectureForm> {
     });
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Monitor section changes and reload categories
-    final hierarchyProvider = Provider.of<HierarchyProvider>(context);
-    final currentSection = hierarchyProvider.selectedSection;
-    if (currentSection != null && currentSection != _lastSectionId) {
-      _lastSectionId = currentSection;
-      _loadCategoriesForSelectedSection();
-    }
-  }
-
+  /// Load categories for the currently selected section
   Future<void> _loadCategoriesForSelectedSection() async {
     final hierarchyProvider = Provider.of<HierarchyProvider>(
       context,
@@ -70,17 +57,17 @@ class _AddLectureFormState extends State<AddLectureForm> {
     );
     final selectedSection = hierarchyProvider.selectedSection;
     if (selectedSection != null) {
-      setState(() {
-        _isLoadingCats = true;
-        _selectedCategoryId = null;
-        _selectedCategoryName = null;
-        _selectedSubcategoryId = null;
-        _selectedSubcategoryName = null;
-      });
+      developer.log(
+        '[AddLectureForm] Loading categories for section: $selectedSection',
+      );
       await hierarchyProvider.loadCategoriesBySection(selectedSection);
       if (mounted) {
         setState(() {
-          _isLoadingCats = false;
+          // Reset selection when categories reload
+          _selectedCategoryId = null;
+          _selectedCategoryName = null;
+          _selectedSubcategoryId = null;
+          _selectedSubcategoryName = null;
         });
       }
     }
@@ -330,45 +317,52 @@ class _AddLectureFormState extends State<AddLectureForm> {
                 // Category Selection
                 Consumer<HierarchyProvider>(
                   builder: (context, hierarchyProvider, child) {
+                    final isLoading = hierarchyProvider.isLoading;
                     final categories = hierarchyProvider.categories;
-                    final isEmpty = !_isLoadingCats && categories.isEmpty;
 
-                    if (isEmpty) {
+                    if (isLoading) {
+                      return DropdownButtonFormField<String>(
+                        value: null,
+                        decoration: const InputDecoration(
+                          labelText: 'الفئة *',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.folder),
+                        ),
+                        items: const [],
+                        hint: const Text('جاري التحميل...'),
+                        onChanged: null,
+                      );
+                    }
+
+                    if (categories.isEmpty) {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.orange[50],
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.orange[200]!),
+                          DropdownButtonFormField<String>(
+                            value: null,
+                            decoration: const InputDecoration(
+                              labelText: 'الفئة *',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.folder),
                             ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.info_outline,
-                                  color: Colors.orange[700],
-                                ),
-                                const SizedBox(width: 8),
-                                const Expanded(
-                                  child: Text('لا توجد فئات - اضغط للإدارة'),
-                                ),
-                              ],
-                            ),
+                            items: const [],
+                            hint: const Text('لا توجد فئات'),
+                            onChanged: null,
                           ),
                           const SizedBox(height: 8),
                           ElevatedButton.icon(
                             onPressed: () async {
-                              final result = await Navigator.pushNamed(
+                              // Navigate to Manage Categories and refresh on return
+                              await Navigator.pushNamed(
                                 context,
-                                '/sheikh/hierarchy/manage',
+                                '/sheikh/manage/hierarchy',
                               );
-                              if (result == true && mounted) {
+                              // Always refresh on return
+                              if (mounted) {
                                 await _loadCategoriesForSelectedSection();
                               }
                             },
-                            icon: const Icon(Icons.category),
+                            icon: const Icon(Icons.settings),
                             label: const Text('إدارة الفئات'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
@@ -381,55 +375,39 @@ class _AddLectureFormState extends State<AddLectureForm> {
 
                     return DropdownButtonFormField<String>(
                       value: _selectedCategoryId,
-                      decoration: InputDecoration(
+                      decoration: const InputDecoration(
                         labelText: 'الفئة *',
-                        border: const OutlineInputBorder(),
-                        prefixIcon: const Icon(Icons.folder),
-                        suffixIcon: _isLoadingCats
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : IconButton(
-                                icon: const Icon(Icons.refresh),
-                                tooltip: 'تحديث',
-                                onPressed: () =>
-                                    _loadCategoriesForSelectedSection(),
-                              ),
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.folder),
                       ),
                       items: categories.map((category) {
                         return DropdownMenuItem<String>(
                           value: category['id'] as String?,
-                          child: Text(category['name'] ?? 'بدون اسم'),
+                          child: Text(
+                            category['name']?.toString() ?? 'بدون اسم',
+                          ),
                         );
                       }).toList(),
-                      onChanged: _isLoadingCats
-                          ? null
-                          : (value) {
-                              setState(() {
-                                _selectedCategoryId = value;
-                                if (value != null) {
-                                  try {
-                                    _selectedCategoryName = categories
-                                        .firstWhere(
-                                          (cat) => cat['id'] == value,
-                                        )['name'];
-                                  } catch (e) {
-                                    _selectedCategoryName = null;
-                                  }
-                                } else {
-                                  _selectedCategoryName = null;
-                                }
-                                _selectedSubcategoryId = null;
-                                _selectedSubcategoryName = null;
-                              });
-                              if (value != null) {
-                                _loadSubcategories(value);
-                              }
-                            },
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedCategoryId = value;
+                          if (value != null) {
+                            final category = categories.firstWhere(
+                              (cat) => cat['id'] == value,
+                              orElse: () => {},
+                            );
+                            _selectedCategoryName = category['name']
+                                ?.toString();
+                          } else {
+                            _selectedCategoryName = null;
+                          }
+                          _selectedSubcategoryId = null;
+                          _selectedSubcategoryName = null;
+                        });
+                        if (value != null) {
+                          _loadSubcategories(value);
+                        }
+                      },
                     );
                   },
                 ),
@@ -923,10 +901,20 @@ class _AddLectureFormState extends State<AddLectureForm> {
     final selectedSection = hierarchyProvider.selectedSection;
 
     // Validate hierarchy selection
-    if (selectedSection == null || _selectedCategoryId == null) {
+    if (selectedSection == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('يرجى اختيار القسم والفئة'),
+          content: Text('يرجى اختيار القسم'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    if (_selectedCategoryId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('يرجى اختيار الفئة'),
           backgroundColor: Colors.red,
         ),
       );
@@ -1069,14 +1057,24 @@ class _AddLectureFormState extends State<AddLectureForm> {
     );
 
     if (success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تم حفظ المحاضرة بنجاح'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      // Pop with refresh=true to trigger reload in parent screen
-      Navigator.pop(context, true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم حفظ المحاضرة بنجاح'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context);
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(lectureProvider.errorMessage ?? 'فشل حفظ المحاضرة'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 }

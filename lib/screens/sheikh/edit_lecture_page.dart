@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:new_project/provider/pro_login.dart';
 import 'package:new_project/provider/lecture_provider.dart';
 import 'package:new_project/widgets/sheikh_guard.dart';
-import 'package:new_project/utils/date_converter.dart';
+import 'package:new_project/utils/time.dart';
 
 class EditLecturePage extends StatefulWidget {
   const EditLecturePage({super.key});

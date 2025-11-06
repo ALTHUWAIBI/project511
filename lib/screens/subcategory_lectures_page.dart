@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:new_project/offline/firestore_shims.dart';
 import 'package:new_project/provider/lecture_provider.dart';
+import 'package:new_project/utils/time.dart';
 import '../widgets/app_drawer.dart';
 
 class SubcategoryLecturesPage extends StatefulWidget {
@@ -136,7 +137,7 @@ class _SubcategoryLecturesPageState extends State<SubcategoryLecturesPage> {
                         children: [
                           const SizedBox(height: 8),
                           Text(
-                            lecture['description'],
+                            lecture['description']?.toString() ?? '',
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -232,23 +233,33 @@ class _SubcategoryLecturesPageState extends State<SubcategoryLecturesPage> {
   }
 
   void _showLectureDetails(BuildContext context, Map<String, dynamic> lecture) {
+    // Null-safe field extraction
+    final title = lecture['title']?.toString() ?? 'بدون عنوان';
+    final description = lecture['description']?.toString() ?? '';
+    final videoPath = lecture['video_path']?.toString();
+    final createdAt = safeDateFromDynamic(
+      lecture['createdAt'] ?? lecture['created_at'],
+    );
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(lecture['title']),
+        title: Text(title),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'الوصف:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text(lecture['description']),
-              const SizedBox(height: 16),
-              if (lecture['video_path'] != null) ...[
+              if (description.isNotEmpty) ...[
+                const Text(
+                  'الوصف:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(description),
+                const SizedBox(height: 16),
+              ],
+              if (videoPath != null && videoPath.isNotEmpty) ...[
                 const Text(
                   'يحتوي على فيديو',
                   style: TextStyle(
@@ -258,10 +269,11 @@ class _SubcategoryLecturesPageState extends State<SubcategoryLecturesPage> {
                 ),
                 const SizedBox(height: 8),
               ],
-              Text(
-                'تاريخ الإضافة: ${_formatDate(lecture['created_at'])}',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
+              if (createdAt != null)
+                Text(
+                  'تاريخ الإضافة: ${_formatDate(createdAt)}',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
             ],
           ),
         ),

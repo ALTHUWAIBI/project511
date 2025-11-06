@@ -21,6 +21,7 @@ import 'package:new_project/provider/hierarchy_provider.dart';
 import 'package:new_project/database/app_database.dart';
 import 'package:new_project/repository/local_repository.dart';
 import 'package:sqlite3_flutter_libs/sqlite3_flutter_libs.dart';
+import 'package:sqflite/sqflite.dart';
 import 'dart:developer' as developer;
 
 void main() async {
@@ -69,9 +70,54 @@ Future<void> _initializeAppDatabase() async {
     final appDatabase = AppDatabase();
     await appDatabase.database;
 
-    // Log database path and health check
+    // Log DB path on first open
     final dbPath = await appDatabase.getDatabasePath();
-    developer.log('[DB] path: $dbPath');
+    developer.log('[DB] Database path: $dbPath');
+
+    // Read user_version to prove persistence
+    try {
+      final db = await appDatabase.database;
+      final userVersionResult = await db.rawQuery('PRAGMA user_version');
+      final userVersion = Sqflite.firstIntValue(userVersionResult) ?? 0;
+      developer.log('[DB] user_version: $userVersion');
+    } catch (e) {
+      developer.log('[DB] Could not read user_version: $e');
+    }
+
+    // Log sheikh count (non-deleted) to prove persistence
+    try {
+      final db = await appDatabase.database;
+      final sheikhCountResult = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM sheikhs WHERE isDeleted = 0',
+      );
+      final sheikhCount = Sqflite.firstIntValue(sheikhCountResult) ?? 0;
+      developer.log('[DB] sheikhs(non-deleted): $sheikhCount');
+    } catch (e) {
+      developer.log('[DB] Could not count sheikhs: $e');
+    }
+
+    // Log lecture counts for diagnostics
+    try {
+      final db = await appDatabase.database;
+      // Count published, non-deleted lectures
+      final publishedCountResult = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM lectures WHERE isDeleted = 0 AND isPublished = 1',
+      );
+      final publishedCount = Sqflite.firstIntValue(publishedCountResult) ?? 0;
+      developer.log('[DB] lectures(published, non-deleted): $publishedCount');
+
+      // Count by section
+      final sectionCountResult = await db.rawQuery(
+        'SELECT section, COUNT(*) as count FROM lectures WHERE isDeleted = 0 AND isPublished = 1 GROUP BY section',
+      );
+      for (final row in sectionCountResult) {
+        final section = row['section']?.toString() ?? 'unknown';
+        final count = row['count'] as int? ?? 0;
+        developer.log('[DB] lectures by section: $section = $count');
+      }
+    } catch (e) {
+      developer.log('[DB] Could not count lectures: $e');
+    }
 
     final isHealthy = await appDatabase.healthCheck();
     if (!isHealthy) {
@@ -123,6 +169,39 @@ Future<void> _initializeAppDatabase() async {
       '[DB] users: ${counts['users']} | subcategories: ${counts['subcategories']} | lectures: ${counts['lectures']} | sheikhs: ${counts['sheikhs'] ?? 0}',
     );
 
+    // Diagnostic logging: Published lectures count and section distribution
+    try {
+      final db = await appDatabase.database;
+
+      // Count published lectures
+      final publishedCountResult = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM lectures WHERE isPublished = 1 AND status NOT IN (?, ?)',
+        ['archived', 'deleted'],
+      );
+      final publishedCount = Sqflite.firstIntValue(publishedCountResult) ?? 0;
+      developer.log(
+        '[DB] Published lectures (isPublished=1, not deleted): $publishedCount',
+      );
+
+      // Section distribution
+      final sectionDistResult = await db.rawQuery(
+        'SELECT section, COUNT(*) as count FROM lectures WHERE isPublished = 1 AND status NOT IN (?, ?) GROUP BY section',
+        ['archived', 'deleted'],
+      );
+      if (sectionDistResult.isNotEmpty) {
+        final sectionDist = sectionDistResult
+            .map((row) {
+              return '${row['section']}: ${row['count']}';
+            })
+            .join(', ');
+        developer.log('[DB] Section distribution: $sectionDist');
+      } else {
+        developer.log('[DB] No published lectures found in any section');
+      }
+    } catch (e) {
+      developer.log('[DB] Could not query lecture diagnostics: $e');
+    }
+
     developer.log('[DB] Initialization completed');
   } catch (e) {
     developer.log('[DB] Initialization error: $e', name: 'main');
@@ -155,17 +234,6 @@ class _MyAppState extends State<MyApp> {
       // Initialize AuthProvider
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       await authProvider.initialize();
-
-      // Initialize all data providers to load from SQLite
-      final lectureProvider = Provider.of<LectureProvider>(
-        context,
-        listen: false,
-      );
-
-      // Load all lectures from SQLite on startup
-      await lectureProvider.loadAllSections();
-
-      developer.log('[App] Data providers initialized from SQLite');
 
       setState(() {
         _initialized = true;

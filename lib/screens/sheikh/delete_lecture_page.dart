@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:new_project/provider/pro_login.dart';
 import 'package:new_project/provider/lecture_provider.dart';
 import 'package:new_project/widgets/sheikh_guard.dart';
-import 'package:new_project/utils/date_converter.dart';
+import 'package:new_project/utils/time.dart';
 
 class DeleteLecturePage extends StatefulWidget {
   const DeleteLecturePage({super.key});
@@ -205,12 +205,16 @@ class _DeleteLecturePageState extends State<DeleteLecturePage> {
   }
 
   Widget _buildLectureCard(Map<String, dynamic> lecture, bool isArchived) {
-    final title = lecture['title'] ?? 'بدون عنوان';
-    final categoryName = lecture['categoryNameAr'] ?? '';
+    // Null-safe field extraction
+    final title = lecture['title']?.toString() ?? 'بدون عنوان';
+    final categoryName =
+        lecture['categoryName']?.toString() ??
+        lecture['categoryNameAr']?.toString() ??
+        'غير محدد';
     // Use safe date conversion - handles Timestamp, int (epoch ms), String, DateTime
     final startTime = safeDateFromDynamic(lecture['startTime']);
-    final status = lecture['status'] ?? 'draft';
-    final description = lecture['description'] ?? '';
+    final status = lecture['status']?.toString() ?? 'draft';
+    final description = lecture['description']?.toString() ?? '';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -362,7 +366,7 @@ class _DeleteLecturePageState extends State<DeleteLecturePage> {
               Text('هل أنت متأكد من حذف المحاضرة:'),
               const SizedBox(height: 8),
               Text(
-                lecture['title'] ?? 'بدون عنوان',
+                lecture['title']?.toString() ?? 'بدون عنوان',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
@@ -442,7 +446,7 @@ class _DeleteLecturePageState extends State<DeleteLecturePage> {
               Text('هل أنت متأكد من الحذف النهائي للمحاضرة:'),
               const SizedBox(height: 8),
               Text(
-                lecture['title'] ?? 'بدون عنوان',
+                lecture['title']?.toString() ?? 'بدون عنوان',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
@@ -512,8 +516,16 @@ class _DeleteLecturePageState extends State<DeleteLecturePage> {
       return;
     }
 
+    final lectureId = lecture['id']?.toString();
+    if (lectureId == null || lectureId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('خطأ: معرف المحاضرة غير صحيح')),
+      );
+      return;
+    }
+
     final success = await lectureProvider.archiveSheikhLecture(
-      lectureId: lecture['id'],
+      lectureId: lectureId,
       sheikhId: currentUid,
     );
 
@@ -556,8 +568,16 @@ class _DeleteLecturePageState extends State<DeleteLecturePage> {
       return;
     }
 
+    final lectureId = lecture['id']?.toString();
+    if (lectureId == null || lectureId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('خطأ: معرف المحاضرة غير صحيح')),
+      );
+      return;
+    }
+
     final success = await lectureProvider.deleteSheikhLecture(
-      lectureId: lecture['id'],
+      lectureId: lectureId,
       sheikhId: currentUid,
     );
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:new_project/repository/local_repository.dart';
+import 'dart:developer' as developer;
 
 class LectureProvider extends ChangeNotifier {
   final LocalRepository _repository = LocalRepository();
@@ -60,7 +61,7 @@ class LectureProvider extends ChangeNotifier {
     }
   }
 
-  // Load lectures by section
+  // Load lectures by section (accepts both canonical keys and Arabic names)
   Future<void> loadLecturesBySection(String section) async {
     _setLoading(true);
     _setError(null);
@@ -68,17 +69,19 @@ class LectureProvider extends ChangeNotifier {
     try {
       final lectures = await _repository.getLecturesBySection(section);
 
-      switch (section) {
-        case 'الفقه':
+      // Normalize section to canonical key for assignment
+      final normalizedSection = _normalizeSectionKey(section);
+      switch (normalizedSection) {
+        case 'fiqh':
           _fiqhLectures = lectures;
           break;
-        case 'الحديث':
+        case 'hadith':
           _hadithLectures = lectures;
           break;
-        case 'التفسير':
+        case 'tafsir':
           _tafsirLectures = lectures;
           break;
-        case 'السيرة':
+        case 'seerah':
           _seerahLectures = lectures;
           break;
       }
@@ -91,17 +94,38 @@ class LectureProvider extends ChangeNotifier {
     }
   }
 
-  // Load all sections
+  // Normalize section key helper
+  String _normalizeSectionKey(String section) {
+    switch (section.trim()) {
+      case 'الفقه':
+        return 'fiqh';
+      case 'الحديث':
+        return 'hadith';
+      case 'السيرة':
+        return 'seerah';
+      case 'التفسير':
+        return 'tafsir';
+      case 'fiqh':
+      case 'hadith':
+      case 'seerah':
+      case 'tafsir':
+        return section.trim();
+      default:
+        return section.trim().toLowerCase();
+    }
+  }
+
+  // Load all sections (using canonical keys)
   Future<void> loadAllSections() async {
     _setLoading(true);
     _setError(null);
 
     try {
       _allLectures = await _repository.getAllLectures();
-      _fiqhLectures = await _repository.getLecturesBySection('الفقه');
-      _hadithLectures = await _repository.getLecturesBySection('الحديث');
-      _tafsirLectures = await _repository.getLecturesBySection('التفسير');
-      _seerahLectures = await _repository.getLecturesBySection('السيرة');
+      _fiqhLectures = await _repository.getLecturesBySection('fiqh');
+      _hadithLectures = await _repository.getLecturesBySection('hadith');
+      _tafsirLectures = await _repository.getLecturesBySection('tafsir');
+      _seerahLectures = await _repository.getLecturesBySection('seerah');
 
       _setLoading(false);
       notifyListeners();
@@ -331,10 +355,16 @@ class LectureProvider extends ChangeNotifier {
         return false;
       }
 
+      // Normalize section to canonical key before saving
+      final normalizedSection = _normalizeSectionKey(section);
+      developer.log(
+        '[LectureProvider] Adding lecture: original section=$section, normalized=$normalizedSection',
+      );
+
       final result = await _repository.addSheikhLecture(
         sheikhId: sheikhId,
         sheikhName: sheikhName,
-        section: section,
+        section: normalizedSection,
         categoryId: categoryId,
         categoryName: categoryName,
         subcategoryId: subcategoryId,
@@ -351,14 +381,11 @@ class LectureProvider extends ChangeNotifier {
         // Reload sheikh lectures and stats
         await loadSheikhLectures(sheikhId);
         await loadSheikhStats(sheikhId);
-        // Reload lectures by category if categoryId is available
-        if (categoryId.isNotEmpty) {
-          await loadSheikhLecturesByCategory(sheikhId, categoryId);
-        }
-        // Reload all sections to keep lists in sync
-        await loadAllSections();
+        // Also reload all lectures for home page visibility
+        await loadAllLectures();
+        // Reload the section's lectures
+        await loadLecturesBySection(normalizedSection);
         _setLoading(false);
-        notifyListeners();
         return true;
       } else {
         _setLoading(false);
@@ -419,10 +446,7 @@ class LectureProvider extends ChangeNotifier {
         // Reload sheikh lectures and stats
         await loadSheikhLectures(sheikhId);
         await loadSheikhStats(sheikhId);
-        // Reload all sections to keep lists in sync
-        await loadAllSections();
         _setLoading(false);
-        notifyListeners();
         return true;
       } else {
         _setLoading(false);
@@ -454,10 +478,7 @@ class LectureProvider extends ChangeNotifier {
         // Reload sheikh lectures and stats
         await loadSheikhLectures(sheikhId);
         await loadSheikhStats(sheikhId);
-        // Reload all sections to keep lists in sync
-        await loadAllSections();
         _setLoading(false);
-        notifyListeners();
         return true;
       } else {
         _setLoading(false);
@@ -489,10 +510,7 @@ class LectureProvider extends ChangeNotifier {
         // Reload sheikh lectures and stats
         await loadSheikhLectures(sheikhId);
         await loadSheikhStats(sheikhId);
-        // Reload all sections to keep lists in sync
-        await loadAllSections();
         _setLoading(false);
-        notifyListeners();
         return true;
       } else {
         _setLoading(false);
