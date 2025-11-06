@@ -5,7 +5,7 @@ import 'package:new_project/provider/lecture_provider.dart';
 import 'package:new_project/provider/hierarchy_provider.dart';
 import 'package:new_project/widgets/sheikh_guard.dart';
 import 'package:new_project/utils/youtube_utils.dart';
-import 'package:youtube_player_flutter/youtube_player_flutter.dart';
+import 'package:new_project/widgets/youtube_player_widget.dart';
 import 'dart:developer' as developer;
 
 class AddLectureForm extends StatefulWidget {
@@ -685,33 +685,50 @@ class _AddLectureFormState extends State<AddLectureForm> {
           ),
         ],
         if (_isValidYouTubeUrl && _extractedVideoId != null) ...[
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.green[50],
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: Colors.green[200] ?? Colors.green),
-            ),
-            child: Row(
+          const SizedBox(height: 12),
+          _buildVideoPreview(),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildVideoPreview() {
+    if (_extractedVideoId == null || _extractedVideoId!.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Icon(Icons.check_circle, color: Colors.green[600], size: 16),
+                Icon(Icons.video_library, color: Colors.green[700], size: 20),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'رابط يوتيوب صحيح - معرف الفيديو: $_extractedVideoId',
-                    style: TextStyle(color: Colors.green[700], fontSize: 12),
+                const Text(
+                  'معاينة الفيديو',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green,
                   ),
-                ),
-                TextButton(
-                  onPressed: _previewVideo,
-                  child: const Text('معاينة'),
                 ),
               ],
             ),
-          ),
-        ],
-      ],
+            const SizedBox(height: 12),
+            YouTubePlayerWidget(
+              videoId: _extractedVideoId,
+              videoUrl: _videoUrlController.text.trim(),
+              autoPlay: false,
+              showControls: true,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -790,82 +807,6 @@ class _AddLectureFormState extends State<AddLectureForm> {
       _extractedVideoId = result['videoId'];
       _youtubeValidationError = result['error'];
     });
-  }
-
-  void _previewVideo() {
-    if (_extractedVideoId == null) return;
-
-    showDialog(
-      context: context,
-      builder: (context) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: Dialog(
-          child: Container(
-            width: MediaQuery.of(context).size.width * 0.9,
-            height: MediaQuery.of(context).size.height * 0.6,
-            child: Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.green,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(8),
-                      topRight: Radius.circular(8),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.play_circle, color: Colors.white),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text(
-                          'معاينة الفيديو',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Container(
-                    color: Colors.black,
-                    child: YoutubePlayer(
-                      controller: YoutubePlayerController(
-                        initialVideoId: _extractedVideoId!,
-                        flags: const YoutubePlayerFlags(
-                          autoPlay: false,
-                          mute: false,
-                          isLive: false,
-                          forceHD: true,
-                          enableCaption: true,
-                        ),
-                      ),
-                      showVideoProgressIndicator: true,
-                      progressIndicatorColor: Colors.green,
-                      onReady: () {
-                        // Video is ready to play
-                      },
-                      onEnded: (data) {
-                        // Video ended
-                      },
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   // ==================== Hierarchy Helper Methods ====================

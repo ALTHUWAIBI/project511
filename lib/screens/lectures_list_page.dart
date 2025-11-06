@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:new_project/provider/hierarchy_provider.dart';
 import 'package:new_project/utils/youtube_utils.dart';
-import 'package:youtube_player_flutter/youtube_player_flutter.dart';
+import 'package:new_project/screens/lecture_detail_screen.dart';
 import 'package:new_project/offline/firestore_shims.dart';
 import '../widgets/app_drawer.dart';
 
@@ -191,9 +191,16 @@ class _LecturesListPageState extends State<LecturesListPage> {
   }
 
   Widget _buildLectureCard(Map<String, dynamic> lecture) {
-    final mediaUrl = lecture['media']?['videoUrl'] ?? '';
+    // Check for videoId - only show video icon if videoId exists
+    final videoId = lecture['videoId']?.toString();
+    final videoUrl =
+        lecture['video_path']?.toString() ??
+        lecture['media']?['videoUrl']?.toString();
     final hasVideo =
-        mediaUrl.isNotEmpty && YouTubeUtils.extractVideoId(mediaUrl) != null;
+        (videoId != null && videoId.isNotEmpty) ||
+        (videoUrl != null &&
+            videoUrl.isNotEmpty &&
+            YouTubeUtils.extractVideoId(videoUrl) != null);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -251,203 +258,10 @@ class _LecturesListPageState extends State<LecturesListPage> {
   }
 
   void _showLectureDetails(Map<String, dynamic> lecture) {
-    showDialog(
-      context: context,
-      builder: (context) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: Dialog(
-          child: Container(
-            width: MediaQuery.of(context).size.width * 0.95,
-            height: MediaQuery.of(context).size.height * 0.8,
-            child: Column(
-              children: [
-                // Header
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                    color: Colors.green,
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(12),
-                      topRight: Radius.circular(12),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          lecture['title'] ?? 'بدون عنوان',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close, color: Colors.white),
-                      ),
-                    ],
-                  ),
-                ),
-                // Content
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (lecture['description'] != null &&
-                            lecture['description'].toString().isNotEmpty) ...[
-                          const Text(
-                            'الوصف:',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            lecture['description']?.toString() ?? '',
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                          const SizedBox(height: 16),
-                        ],
-                        if (lecture['startTime'] != null) ...[
-                          const Text(
-                            'وقت البداية:',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _formatDateTime(lecture['startTime']),
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                          const SizedBox(height: 16),
-                        ],
-                        if (lecture['endTime'] != null) ...[
-                          const Text(
-                            'وقت النهاية:',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _formatDateTime(lecture['endTime']),
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                          const SizedBox(height: 16),
-                        ],
-                        if (lecture['location'] != null) ...[
-                          const Text(
-                            'الموقع:',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            (lecture['location']
-                                        as Map<String, dynamic>?)?['label']
-                                    ?.toString() ??
-                                'غير محدد',
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                          const SizedBox(height: 16),
-                        ],
-                        // Video player
-                        if (lecture['media']?['videoUrl'] != null) ...[
-                          const Text(
-                            'الفيديو:',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          _buildVideoPlayer(lecture),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVideoPlayer(Map<String, dynamic> lecture) {
-    final mediaUrl = lecture['media']?['videoUrl'] ?? '';
-    if (mediaUrl.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    // Try to get videoId from lecture data first, then extract from URL
-    String? videoId = lecture['media']?['videoId'] as String?;
-    if (videoId == null || videoId.isEmpty) {
-      videoId = YouTubeUtils.extractVideoId(mediaUrl);
-    }
-
-    if (videoId == null) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.orange[50],
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.orange[200] ?? Colors.orange),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.warning, color: Colors.orange[600], size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'رابط الفيديو غير مدعوم أو غير صحيح',
-                style: TextStyle(color: Colors.orange[700]),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Container(
-      height: 200,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[300] ?? Colors.grey),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: YoutubePlayer(
-          controller: YoutubePlayerController(
-            initialVideoId: videoId,
-            flags: const YoutubePlayerFlags(
-              autoPlay: false,
-              mute: false,
-              isLive: false,
-              forceHD: true,
-              enableCaption: true,
-            ),
-          ),
-          showVideoProgressIndicator: true,
-          progressIndicatorColor: Colors.green,
-          onReady: () {
-            // Video is ready to play
-          },
-          onEnded: (data) {
-            // Video ended
-          },
-        ),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LectureDetailScreen(lecture: lecture),
       ),
     );
   }

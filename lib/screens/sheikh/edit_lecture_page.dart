@@ -5,6 +5,7 @@ import 'package:new_project/provider/lecture_provider.dart';
 import 'package:new_project/provider/hierarchy_provider.dart';
 import 'package:new_project/widgets/sheikh_guard.dart';
 import 'package:new_project/utils/time.dart';
+import 'package:new_project/utils/youtube_utils.dart';
 
 class EditLecturePage extends StatefulWidget {
   const EditLecturePage({super.key});
@@ -342,10 +343,24 @@ class _EditLectureFormState extends State<EditLectureForm> {
       _locationController.text = location['label'] ?? '';
     }
 
+    // Load media URLs - check multiple sources
     final media = widget.lecture['media'] as Map<String, dynamic>?;
     if (media != null) {
       _audioUrlController.text = media['audioUrl'] ?? '';
-      _videoUrlController.text = media['videoUrl'] ?? '';
+      // Check videoUrl in media, or video_path, or construct from videoId
+      _videoUrlController.text =
+          media['videoUrl'] ??
+          widget.lecture['video_path']?.toString() ??
+          (widget.lecture['videoId'] != null
+              ? YouTubeUtils.getWatchUrl(widget.lecture['videoId'].toString())
+              : '');
+    } else {
+      // If no media object, check direct fields
+      _videoUrlController.text =
+          widget.lecture['video_path']?.toString() ??
+          (widget.lecture['videoId'] != null
+              ? YouTubeUtils.getWatchUrl(widget.lecture['videoId'].toString())
+              : '');
     }
 
     // Use safe date conversion - handles Timestamp, int (epoch ms), String, DateTime
@@ -873,16 +888,22 @@ class _EditLectureFormState extends State<EditLectureForm> {
       );
     }
 
-    // Prepare media data
+    // Prepare media data with videoId extraction
     Map<String, dynamic>? media;
     if (_audioUrlController.text.isNotEmpty ||
         _videoUrlController.text.isNotEmpty) {
       media = {};
       if (_audioUrlController.text.isNotEmpty) {
-        media['audioUrl'] = _audioUrlController.text;
+        media['audioUrl'] = _audioUrlController.text.trim();
       }
       if (_videoUrlController.text.isNotEmpty) {
-        media['videoUrl'] = _videoUrlController.text;
+        final videoUrl = _videoUrlController.text.trim();
+        media['videoUrl'] = videoUrl;
+        // Extract videoId from URL
+        final videoId = YouTubeUtils.extractVideoId(videoUrl);
+        if (videoId != null) {
+          media['videoId'] = videoId;
+        }
       }
     }
 

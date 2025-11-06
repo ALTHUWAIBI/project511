@@ -9,8 +9,7 @@ class AppDatabase {
   static final AppDatabase _instance = AppDatabase._internal();
   static Database? _database;
   static Future<void>? _initFuture;
-  static const int _currentVersion =
-      9; // Bumped for category_id in subcategories
+  static const int _currentVersion = 10; // Bumped for videoId in lectures
   static const String _dbName = 'main_app.db'; // Single canonical DB file name
 
   AppDatabase._internal();
@@ -280,6 +279,9 @@ class AppDatabase {
             break;
           case 9:
             await _migrationV9(db);
+            break;
+          case 10:
+            await _migrationV10(db);
             break;
           default:
             developer.log(
@@ -1077,6 +1079,37 @@ class AppDatabase {
       developer.log('[AppDatabase] Error during v9 migration: $e');
       rethrow;
     }
+  }
+
+  /// Migration v10: Add videoId column to lectures table for YouTube videos
+  Future<void> _migrationV10(Database db) async {
+    developer.log(
+      '[AppDatabase] Applying migration v10: Add videoId to lectures',
+    );
+
+    try {
+      // Check if videoId column already exists
+      final columns = await db.rawQuery("PRAGMA table_info(lectures)");
+      final hasVideoId = columns.any((col) => col['name'] == 'videoId');
+
+      if (!hasVideoId) {
+        // Add videoId column
+        await db.execute('ALTER TABLE lectures ADD COLUMN videoId TEXT');
+        developer.log('[AppDatabase] Added videoId column to lectures');
+
+        // Create index on videoId for faster lookups
+        await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_lectures_videoId ON lectures(videoId)',
+        );
+      } else {
+        developer.log('[AppDatabase] videoId column already exists');
+      }
+    } catch (e) {
+      developer.log('[AppDatabase] Error during v10 migration: $e');
+      rethrow;
+    }
+
+    developer.log('[AppDatabase] Migration v10 completed');
   }
 
   /// Ensure schema is applied - used for defensive retry

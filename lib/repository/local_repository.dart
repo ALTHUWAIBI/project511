@@ -3,6 +3,7 @@ import 'package:new_project/database/app_database.dart';
 import 'package:new_project/utils/time.dart';
 import 'package:new_project/utils/hash.dart';
 import 'package:new_project/utils/uuid.dart';
+import 'package:new_project/utils/youtube_utils.dart';
 import 'dart:developer' as developer;
 
 /// Local Repository - SQLite-only implementation
@@ -1408,11 +1409,27 @@ class LocalRepository {
         final lectureId = generateUUID();
         final now = nowMillis();
 
-        // Extract video path from media if provided
+        // Extract video path and videoId from media if provided
         String? videoPath;
+        String? videoId;
         if (media != null) {
           videoPath =
               media['videoPath']?.toString() ?? media['video_path']?.toString();
+          videoId = media['videoId']?.toString();
+          // Also extract from videoUrl if videoId not directly provided
+          if ((videoId == null || videoId.isEmpty) &&
+              videoPath != null &&
+              videoPath.isNotEmpty) {
+            // Try to extract from video_path if it's a YouTube URL
+            videoId = YouTubeUtils.extractVideoId(videoPath);
+          }
+          // Also check videoUrl field
+          if (videoId == null || videoId.isEmpty) {
+            final videoUrl = media['videoUrl']?.toString();
+            if (videoUrl != null && videoUrl.isNotEmpty) {
+              videoId = YouTubeUtils.extractVideoId(videoUrl);
+            }
+          }
         }
 
         // Normalize section to canonical key (e.g., 'الفقه' -> 'fiqh')
@@ -1429,6 +1446,7 @@ class LocalRepository {
           'title': title,
           'description': description ?? '',
           'video_path': videoPath ?? '',
+          'videoId': videoId ?? '',
           'section': normalizedSection,
           'subcategory_id': subcategoryId ?? '',
           'sheikhId': sheikhId,
@@ -1571,11 +1589,33 @@ class LocalRepository {
         if (description != null) updateData['description'] = description;
         if (endTime != null) updateData['endTime'] = endTime;
 
-        // Update video path from media if provided
+        // Update video URL and videoId from media if provided
         if (media != null) {
-          final videoPath =
-              media['videoPath']?.toString() ?? media['video_path']?.toString();
-          if (videoPath != null) updateData['video_path'] = videoPath;
+          // Extract videoUrl (preferred) or video_path (fallback)
+          final videoUrl =
+              media['videoUrl']?.toString() ??
+              media['videoPath']?.toString() ??
+              media['video_path']?.toString();
+
+          // Extract videoId - prefer direct videoId, otherwise extract from URL
+          String? videoId = media['videoId']?.toString();
+          if ((videoId == null || videoId.isEmpty) &&
+              videoUrl != null &&
+              videoUrl.isNotEmpty) {
+            videoId = YouTubeUtils.extractVideoId(videoUrl);
+          }
+
+          // Store both video_path (for backward compatibility) and videoId
+          if (videoUrl != null && videoUrl.isNotEmpty) {
+            updateData['video_path'] = videoUrl;
+            if (videoId != null && videoId.isNotEmpty) {
+              updateData['videoId'] = videoId;
+            }
+          } else {
+            // If videoUrl is cleared, also clear videoId and video_path
+            updateData['video_path'] = '';
+            updateData['videoId'] = '';
+          }
         }
 
         await db.update(
