@@ -22,28 +22,23 @@ import 'package:new_project/database/app_database.dart';
 import 'package:new_project/repository/local_repository.dart';
 import 'package:sqlite3_flutter_libs/sqlite3_flutter_libs.dart';
 import 'package:sqflite/sqflite.dart';
+import 'dart:async';
 import 'dart:developer' as developer;
 
 void main() async {
+  final stopwatch = Stopwatch()..start();
+
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load bundled SQLite with FTS5 support (Android)
-  try {
-    await applyWorkaroundToOpenSqlite3OnOldAndroidVersions();
-    developer.log('[SQLite] Bundled SQLite library loaded');
-  } catch (e) {
-    developer.log('[SQLite] Could not load bundled SQLite: $e');
-    // Continue - will fall back to device SQLite
-  }
+  // Load bundled SQLite with FTS5 support (Android) - non-blocking
+  unawaited(_loadSQLiteLibrary());
 
   // Enable full error reporting
   FlutterError.onError = (details) {
     FlutterError.dumpErrorToConsole(details);
   };
 
-  // Initialize AppDatabase (must complete before any queries)
-  await _initializeAppDatabase();
-
+  // Start app immediately - database will warm up after first frame
   runApp(
     MultiProvider(
       providers: [
@@ -59,9 +54,72 @@ void main() async {
       child: const MyApp(),
     ),
   );
+
+  // Warm up database after first frame (non-blocking)
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(_warmUpDatabase());
+  });
+
+  stopwatch.stop();
+  assert(() {
+    developer.log(
+      '[PERF] main() completed in ${stopwatch.elapsedMilliseconds}ms',
+    );
+    return true;
+  }());
+}
+
+// Load SQLite library asynchronously (non-blocking)
+Future<void> _loadSQLiteLibrary() async {
+  try {
+    await applyWorkaroundToOpenSqlite3OnOldAndroidVersions();
+    assert(() {
+      developer.log('[SQLite] Bundled SQLite library loaded');
+      return true;
+    }());
+  } catch (e) {
+    assert(() {
+      developer.log('[SQLite] Could not load bundled SQLite: $e');
+      return true;
+    }());
+    // Continue - will fall back to device SQLite
+  }
+}
+
+// Warm up database connection after first frame (non-blocking)
+Future<void> _warmUpDatabase() async {
+  final stopwatch = Stopwatch()..start();
+  try {
+    assert(() {
+      developer.log('[DB] Warming up database connection...');
+      return true;
+    }());
+
+    // Initialize AppDatabase - lazy initialization will happen on first use
+    final appDatabase = AppDatabase();
+    // Touch the database to trigger initialization
+    await appDatabase.database;
+
+    stopwatch.stop();
+    assert(() {
+      developer.log(
+        '[PERF] Database warm-up completed in ${stopwatch.elapsedMilliseconds}ms',
+      );
+      return true;
+    }());
+  } catch (e) {
+    stopwatch.stop();
+    assert(() {
+      developer.log('[DB] Database warm-up error: $e');
+      return true;
+    }());
+  }
 }
 
 // Initialize AppDatabase (robust SQLite with migrations)
+// NOTE: This function is kept for backward compatibility but is no longer called in main()
+// Database initialization is now handled by _warmUpDatabase() after first frame
+// ignore: unused_element
 Future<void> _initializeAppDatabase() async {
   try {
     developer.log('[DB] Initializing AppDatabase...');

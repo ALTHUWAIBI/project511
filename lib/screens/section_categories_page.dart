@@ -26,8 +26,8 @@ class _SectionCategoriesPageState extends State<SectionCategoriesPage> {
   @override
   void initState() {
     super.initState();
-    // Set selected section and load categories
-    Future.microtask(() {
+    // Set selected section and load categories - defer to avoid blocking first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       final hierarchyProvider = Provider.of<HierarchyProvider>(
         context,
         listen: false,

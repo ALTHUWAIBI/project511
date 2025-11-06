@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 /// Smooth page transition helper with slide animation
 class SmoothPageTransition {
   /// Create a smooth slide transition from right to left
-  static Route createRoute(Widget page, {
-    Duration duration = const Duration(milliseconds: 300),
+  /// Optimized duration (150ms) for snappy feel
+  static Route createRoute(
+    Widget page, {
+    Duration duration = const Duration(milliseconds: 150),
     Offset beginOffset = const Offset(1.0, 0.0),
   }) {
     return PageRouteBuilder(
@@ -13,29 +15,20 @@ class SmoothPageTransition {
       reverseTransitionDuration: duration,
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
         // Slide transition
-        var slideAnimation = Tween<Offset>(
-          begin: beginOffset,
-          end: Offset.zero,
-        ).animate(CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeInOutCubic,
-        ));
+        var slideAnimation = Tween<Offset>(begin: beginOffset, end: Offset.zero)
+            .animate(
+              CurvedAnimation(parent: animation, curve: Curves.easeInOutCubic),
+            );
 
         // Fade transition
         var fadeAnimation = Tween<double>(
           begin: 0.0,
           end: 1.0,
-        ).animate(CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeIn,
-        ));
+        ).animate(CurvedAnimation(parent: animation, curve: Curves.easeIn));
 
         return SlideTransition(
           position: slideAnimation,
-          child: FadeTransition(
-            opacity: fadeAnimation,
-            child: child,
-          ),
+          child: FadeTransition(opacity: fadeAnimation, child: child),
         );
       },
     );
@@ -43,10 +36,7 @@ class SmoothPageTransition {
 
   /// Navigate to a page with smooth transition
   static Future<T?> navigateTo<T>(BuildContext context, Widget page) {
-    return Navigator.push<T>(
-      context,
-      createRoute(page) as Route<T>,
-    );
+    return Navigator.push<T>(context, createRoute(page) as Route<T>);
   }
 
   /// Replace current page with smooth transition
@@ -70,4 +60,3 @@ class SmoothPageTransition {
     );
   }
 }
-

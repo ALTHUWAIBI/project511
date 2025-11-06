@@ -31,11 +31,14 @@ class _HomePageState extends State<HomePage> {
   final Set<String> _bookmarkedLectures = <String>{};
   final Set<String> _likedLectures = <String>{};
 
+  // Navigation debouncing to prevent double-taps
+  bool _isNavigating = false;
+
   @override
   void initState() {
     super.initState();
-    // Load location and calculate prayer times
-    Future.microtask(() {
+    // Load location and calculate prayer times - defer to avoid blocking first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadPrayerTimes();
     });
   }
@@ -263,10 +266,9 @@ class _HomePageState extends State<HomePage> {
                 // المضافة مؤخرًا (Recently Added - keep for backward compatibility)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  child: Consumer<LectureProvider>(
-                    builder: (context, lectureProvider, child) {
-                      final recentLectures = lectureProvider.recentLectures;
-
+                  child: Selector<LectureProvider, List<Map<String, dynamic>>>(
+                    selector: (context, provider) => provider.recentLectures,
+                    builder: (context, recentLectures, child) {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -284,7 +286,10 @@ class _HomePageState extends State<HomePage> {
                               if (recentLectures.isNotEmpty)
                                 TextButton(
                                   onPressed: () {
-                                    lectureProvider.loadAllSections();
+                                    Provider.of<LectureProvider>(
+                                      context,
+                                      listen: false,
+                                    ).loadAllSections();
                                   },
                                   child: const Icon(
                                     Icons.refresh,
@@ -346,9 +351,10 @@ class _HomePageState extends State<HomePage> {
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                child: Consumer<AuthProvider>(
-                                  builder: (context, auth, child) {
-                                    final canInteract = auth.canInteract;
+                                child: Selector<AuthProvider, bool>(
+                                  selector: (context, provider) =>
+                                      provider.canInteract,
+                                  builder: (context, canInteract, child) {
                                     return ListTile(
                                       leading: CircleAvatar(
                                         backgroundColor: Colors.green,
@@ -894,45 +900,61 @@ class _HomePageState extends State<HomePage> {
     required IconData icon,
     required bool isDarkMode,
   }) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => SectionCategoriesPage(
-              sectionKey: sectionKey,
-              sectionNameAr: title,
-              isDarkMode: isDarkMode,
-              toggleTheme: widget.toggleTheme,
-            ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _isNavigating
+            ? null
+            : () {
+                setState(() {
+                  _isNavigating = true;
+                });
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => SectionCategoriesPage(
+                      sectionKey: sectionKey,
+                      sectionNameAr: title,
+                      isDarkMode: isDarkMode,
+                      toggleTheme: widget.toggleTheme,
+                    ),
+                  ),
+                ).then((_) {
+                  // Reset navigation flag after navigation completes
+                  if (mounted) {
+                    setState(() {
+                      _isNavigating = false;
+                    });
+                  }
+                });
+              },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.withOpacity(0.3), width: 1),
           ),
-        );
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.withOpacity(0.3), width: 1),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircleAvatar(
-              radius: 24,
-              backgroundColor: Colors.white,
-              child: Icon(icon, color: Colors.black),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.normal,
-                color: Colors.black87,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: Colors.white,
+                child: Icon(icon, color: Colors.black),
               ),
-            ),
-          ],
+              const SizedBox(height: 4),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.normal,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1137,58 +1159,65 @@ class CategoryIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        // Get toggleTheme from parent
-        final homePageState = context.findAncestorStateOfType<_HomePageState>();
-        final toggleTheme = homePageState?.widget.toggleTheme;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          // Get toggleTheme from parent
+          final homePageState = context
+              .findAncestorStateOfType<_HomePageState>();
+          final toggleTheme = homePageState?.widget.toggleTheme;
 
-        switch (title) {
-          case 'الفقه':
-            SmoothPageTransition.navigateTo(
-              context,
-              FiqhSectionPage(isDarkMode: isDarkMode, toggleTheme: toggleTheme),
-            );
-            break;
-          case 'الحديث':
-            SmoothPageTransition.navigateTo(
-              context,
-              HadithSectionPage(
-                isDarkMode: isDarkMode,
-                toggleTheme: toggleTheme,
-              ),
-            );
-            break;
-          case 'التفسير':
-            SmoothPageTransition.navigateTo(
-              context,
-              TafsirSectionPage(
-                isDarkMode: isDarkMode,
-                toggleTheme: toggleTheme,
-              ),
-            );
-            break;
-          case 'السيرة':
-            SmoothPageTransition.navigateTo(
-              context,
-              SeerahSectionPage(
-                isDarkMode: isDarkMode,
-                toggleTheme: toggleTheme,
-              ),
-            );
-            break;
-        }
-      },
-      child: Column(
-        children: [
-          CircleAvatar(
-            radius: 24,
-            backgroundColor: Colors.white,
-            child: Icon(icon, color: Colors.black),
-          ),
-          const SizedBox(height: 4),
-          Text(title, style: const TextStyle(fontSize: 12)),
-        ],
+          switch (title) {
+            case 'الفقه':
+              SmoothPageTransition.navigateTo(
+                context,
+                FiqhSectionPage(
+                  isDarkMode: isDarkMode,
+                  toggleTheme: toggleTheme,
+                ),
+              );
+              break;
+            case 'الحديث':
+              SmoothPageTransition.navigateTo(
+                context,
+                HadithSectionPage(
+                  isDarkMode: isDarkMode,
+                  toggleTheme: toggleTheme,
+                ),
+              );
+              break;
+            case 'التفسير':
+              SmoothPageTransition.navigateTo(
+                context,
+                TafsirSectionPage(
+                  isDarkMode: isDarkMode,
+                  toggleTheme: toggleTheme,
+                ),
+              );
+              break;
+            case 'السيرة':
+              SmoothPageTransition.navigateTo(
+                context,
+                SeerahSectionPage(
+                  isDarkMode: isDarkMode,
+                  toggleTheme: toggleTheme,
+                ),
+              );
+              break;
+          }
+        },
+        child: Column(
+          children: [
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: Colors.white,
+              child: Icon(icon, color: Colors.black),
+            ),
+            const SizedBox(height: 4),
+            Text(title, style: const TextStyle(fontSize: 12)),
+          ],
+        ),
       ),
     );
   }
