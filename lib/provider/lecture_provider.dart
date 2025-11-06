@@ -352,18 +352,30 @@ class LectureProvider extends ChangeNotifier {
 
     try {
       // Check for overlapping lectures
+      // Conflict exists ONLY when: sameSheikh AND sameCategory AND exact same datetime
+      // The datetime includes full precision: year, month, day, hour, minute
+      // Converting to UTC milliseconds ensures consistent timezone handling
       final startTimeMillis = startTime.toUtc().millisecondsSinceEpoch;
       final endTimeMillis = endTime?.toUtc().millisecondsSinceEpoch;
 
+      // Log the datetime being checked for diagnostics
+      final dateTimeStr =
+          '${startTime.year}-${startTime.month.toString().padLeft(2, '0')}-${startTime.day.toString().padLeft(2, '0')} ${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}';
+      developer.log(
+        '[LectureProvider] Checking conflict for: sheikhId=$sheikhId, categoryId=$categoryId, datetime=$dateTimeStr, timestamp=$startTimeMillis',
+        name: 'addSheikhLecture',
+      );
+
       final hasOverlap = await _repository.hasOverlappingLectures(
         sheikhId: sheikhId,
+        categoryId: categoryId,
         startTime: startTimeMillis,
         endTime: endTimeMillis,
       );
 
       if (hasOverlap) {
         _setLoading(false);
-        _setError('يوجد محاضرة أخرى في نفس الوقت');
+        _setError('يوجد محاضرة أخرى في نفس الفئة والتاريخ والوقت بالضبط');
         return false;
       }
 
@@ -417,6 +429,7 @@ class LectureProvider extends ChangeNotifier {
   Future<bool> updateSheikhLecture({
     required String lectureId,
     required String sheikhId,
+    required String categoryId,
     required String title,
     String? description,
     required DateTime startTime,
@@ -429,11 +442,23 @@ class LectureProvider extends ChangeNotifier {
 
     try {
       // Check for overlapping lectures (excluding current lecture)
+      // Conflict exists ONLY when: sameSheikh AND sameCategory AND exact same datetime
+      // The datetime includes full precision: year, month, day, hour, minute
+      // Converting to UTC milliseconds ensures consistent timezone handling
       final startTimeMillis = startTime.toUtc().millisecondsSinceEpoch;
       final endTimeMillis = endTime?.toUtc().millisecondsSinceEpoch;
 
+      // Log the datetime being checked for diagnostics
+      final dateTimeStr =
+          '${startTime.year}-${startTime.month.toString().padLeft(2, '0')}-${startTime.day.toString().padLeft(2, '0')} ${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}';
+      developer.log(
+        '[LectureProvider] Checking conflict for update: lectureId=$lectureId, sheikhId=$sheikhId, categoryId=$categoryId, datetime=$dateTimeStr, timestamp=$startTimeMillis',
+        name: 'updateSheikhLecture',
+      );
+
       final hasOverlap = await _repository.hasOverlappingLectures(
         sheikhId: sheikhId,
+        categoryId: categoryId,
         startTime: startTimeMillis,
         endTime: endTimeMillis,
         excludeLectureId: lectureId,
@@ -441,7 +466,7 @@ class LectureProvider extends ChangeNotifier {
 
       if (hasOverlap) {
         _setLoading(false);
-        _setError('يوجد محاضرة أخرى في نفس الوقت');
+        _setError('يوجد محاضرة أخرى في نفس الفئة والتاريخ والوقت بالضبط');
         return false;
       }
 

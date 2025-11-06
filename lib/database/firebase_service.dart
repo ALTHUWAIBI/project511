@@ -244,11 +244,13 @@ class FirebaseService {
 
   Future<bool> hasOverlappingLectures({
     required String sheikhId,
+    required String categoryId,
     required Timestamp startTime,
     Timestamp? endTime,
     String? excludeLectureId,
   }) => _repo.hasOverlappingLectures(
     sheikhId: sheikhId,
+    categoryId: categoryId,
     startTime: startTime.toDate().millisecondsSinceEpoch,
     endTime: endTime?.toDate().millisecondsSinceEpoch,
     excludeLectureId: excludeLectureId,

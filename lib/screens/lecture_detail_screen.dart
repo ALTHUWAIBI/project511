@@ -63,6 +63,28 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Sheikh name - displayed under title
+              if (_getSheikhName() != null) ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Row(
+                    children: [
+                      Icon(Icons.person, color: Colors.grey[600], size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        'الشيخ: ${_getSheikhName()}',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+
               // Section
               if (section.isNotEmpty) ...[
                 _buildInfoCard(
@@ -83,13 +105,7 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
                 const SizedBox(height: 12),
               ],
 
-              // Description - placed after start time
-              if (description.isNotEmpty) ...[
-                _buildInfoCard('الوصف', description, Icons.description),
-                const SizedBox(height: 12),
-              ],
-
-              // Video player - ONLY if videoId exists, placed after description
+              // Video player - ONLY if videoId exists, placed after start time
               if (resolvedVideoId != null && resolvedVideoId.isNotEmpty) ...[
                 // Video title label
                 Padding(
@@ -187,22 +203,24 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
                 const SizedBox(height: 12),
               ],
 
+              // Location with Google Maps link - placed after audio
+              if (location != null) ...[
+                _buildLocationCard(location),
+                const SizedBox(height: 12),
+              ],
+
+              // Description - placed after location
+              if (description.isNotEmpty) ...[
+                _buildInfoCard('الوصف', description, Icons.description),
+                const SizedBox(height: 12),
+              ],
+
               // End Time
               if (endTime != null) ...[
                 _buildInfoCard(
                   'وقت النهاية',
                   _formatDateTime(endTime),
                   Icons.schedule,
-                ),
-                const SizedBox(height: 12),
-              ],
-
-              // Location
-              if (location != null && location['label'] != null) ...[
-                _buildInfoCard(
-                  'الموقع',
-                  location['label']?.toString() ?? 'غير محدد',
-                  Icons.location_on,
                 ),
                 const SizedBox(height: 12),
               ],
@@ -245,6 +263,16 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
         ),
       ),
     );
+  }
+
+  String? _getSheikhName() {
+    // First try sheikhName field (stored with lecture)
+    final sheikhName = widget.lecture['sheikhName']?.toString();
+    if (sheikhName != null && sheikhName.isNotEmpty && sheikhName != 'null') {
+      return sheikhName;
+    }
+    // Fallback: return null to hide the label (backward compatibility)
+    return null;
   }
 
   String _getSectionDisplayName(String section) {
@@ -292,6 +320,124 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
       }
     } catch (e) {
       // Error handled silently - user can try again
+    }
+  }
+
+  Widget _buildLocationCard(Map<String, dynamic> location) {
+    final locationLabel = location['label']?.toString();
+    final locationUrl =
+        location['url']?.toString() ??
+        location['locationUrl']?.toString() ??
+        location['googleMapsUrl']?.toString();
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.location_on, color: Colors.green, size: 24),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'الموقع',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      if (locationLabel != null && locationLabel.isNotEmpty)
+                        Text(
+                          locationLabel,
+                          style: const TextStyle(fontSize: 16),
+                        )
+                      else
+                        const Text(
+                          'غير محدد',
+                          style: TextStyle(fontSize: 16, color: Colors.grey),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            // Google Maps button if URL exists
+            if (locationUrl != null && locationUrl.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _openInGoogleMaps(locationUrl),
+                  icon: const Icon(Icons.map, size: 20),
+                  label: const Text('عرض على الخريطة'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openInGoogleMaps(String url) async {
+    try {
+      // Ensure URL is properly formatted for Google Maps
+      String mapsUrl = url.trim();
+
+      // If it's not already a full URL, try to make it one
+      if (!mapsUrl.startsWith('http://') && !mapsUrl.startsWith('https://')) {
+        // If it looks like coordinates or a place name, use Google Maps URL format
+        if (mapsUrl.contains(',') && !mapsUrl.contains('://')) {
+          // Likely coordinates: lat,lng
+          mapsUrl = 'https://www.google.com/maps?q=$mapsUrl';
+        } else {
+          // Likely a place name or address
+          mapsUrl =
+              'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(mapsUrl)}';
+        }
+      }
+
+      final uri = Uri.parse(mapsUrl);
+
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('لا يمكن فتح رابط الخريطة'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('حدث خطأ أثناء فتح الخريطة'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 }

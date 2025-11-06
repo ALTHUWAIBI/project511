@@ -9,7 +9,7 @@ class AppDatabase {
   static final AppDatabase _instance = AppDatabase._internal();
   static Database? _database;
   static Future<void>? _initFuture;
-  static const int _currentVersion = 10; // Bumped for videoId in lectures
+  static const int _currentVersion = 11; // Bumped for location JSON in lectures
   static const String _dbName = 'main_app.db'; // Single canonical DB file name
 
   AppDatabase._internal();
@@ -282,6 +282,9 @@ class AppDatabase {
             break;
           case 10:
             await _migrationV10(db);
+            break;
+          case 11:
+            await _migrationV11(db);
             break;
           default:
             developer.log(
@@ -1110,6 +1113,31 @@ class AppDatabase {
     }
 
     developer.log('[AppDatabase] Migration v10 completed');
+  }
+
+  Future<void> _migrationV11(Database db) async {
+    developer.log(
+      '[AppDatabase] Applying migration v11: Add location JSON to lectures',
+    );
+
+    try {
+      // Check if location column already exists
+      final columns = await db.rawQuery("PRAGMA table_info(lectures)");
+      final hasLocation = columns.any((col) => col['name'] == 'location');
+
+      if (!hasLocation) {
+        // Add location column as TEXT (will store JSON)
+        await db.execute('ALTER TABLE lectures ADD COLUMN location TEXT');
+        developer.log('[AppDatabase] Added location column to lectures');
+      } else {
+        developer.log('[AppDatabase] location column already exists');
+      }
+    } catch (e) {
+      developer.log('[AppDatabase] Error during v11 migration: $e');
+      rethrow;
+    }
+
+    developer.log('[AppDatabase] Migration v11 completed');
   }
 
   /// Ensure schema is applied - used for defensive retry

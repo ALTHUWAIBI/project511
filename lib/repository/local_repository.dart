@@ -5,11 +5,31 @@ import 'package:new_project/utils/hash.dart';
 import 'package:new_project/utils/uuid.dart';
 import 'package:new_project/utils/youtube_utils.dart';
 import 'dart:developer' as developer;
+import 'dart:convert';
 
 /// Local Repository - SQLite-only implementation
 /// Replaces FirebaseService with offline-only local database
 /// Uses AppDatabase with defensive retry for crash-proof operations
 class LocalRepository {
+  /// Helper method to deserialize location JSON from database row
+  Map<String, dynamic>? _deserializeLocation(dynamic locationData) {
+    if (locationData == null) return null;
+
+    final locationStr = locationData.toString();
+    if (locationStr.isEmpty || locationStr == 'null') return null;
+
+    try {
+      final locationMap = jsonDecode(locationStr) as Map<String, dynamic>;
+      return locationMap;
+    } catch (e) {
+      developer.log(
+        '[LocalRepository] Error deserializing location: $e, data: $locationStr',
+        name: '_deserializeLocation',
+      );
+      return null;
+    }
+  }
+
   final AppDatabase _dbService = AppDatabase();
 
   /// Helper to execute database operations with defensive retry
@@ -712,6 +732,10 @@ class LocalRepository {
               lecture['subcategoryName']?.toString() ?? '';
           lecture['sheikhName'] = lecture['sheikhName']?.toString() ?? '';
           lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
+
+          // Deserialize location JSON if present
+          lecture['location'] = _deserializeLocation(lecture['location']);
+
           return lecture;
         }).toList();
       }, 'getAllLectures');
@@ -750,6 +774,10 @@ class LocalRepository {
               lecture['subcategoryName']?.toString() ?? '';
           lecture['sheikhName'] = lecture['sheikhName']?.toString() ?? '';
           lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
+
+          // Deserialize location JSON if present
+          lecture['location'] = _deserializeLocation(lecture['location']);
+
           return lecture;
         }).toList();
       }, 'getLecturesBySection');
@@ -871,6 +899,10 @@ class LocalRepository {
                     lecture['subcategoryName']?.toString() ?? '';
                 lecture['sheikhName'] = lecture['sheikhName']?.toString() ?? '';
                 lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
+
+                // Deserialize location JSON if present
+                lecture['location'] = _deserializeLocation(lecture['location']);
+
                 return lecture;
               }).toList();
 
@@ -910,6 +942,10 @@ class LocalRepository {
                     lecture['subcategoryName']?.toString() ?? '';
                 lecture['sheikhName'] = lecture['sheikhName']?.toString() ?? '';
                 lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
+
+                // Deserialize location JSON if present
+                lecture['location'] = _deserializeLocation(lecture['location']);
+
                 return lecture;
               })
               .toList();
@@ -1026,6 +1062,10 @@ class LocalRepository {
               lecture['subcategoryName']?.toString() ?? '';
           lecture['sheikhName'] = lecture['sheikhName']?.toString() ?? '';
           lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
+
+          // Deserialize location JSON if present
+          lecture['location'] = _deserializeLocation(lecture['location']);
+
           return lecture;
         }).toList();
       }, 'getLecturesByCategory');
@@ -1063,6 +1103,10 @@ class LocalRepository {
               lecture['subcategoryName']?.toString() ?? '';
           lecture['sheikhName'] = lecture['sheikhName']?.toString() ?? '';
           lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
+
+          // Deserialize location JSON if present
+          lecture['location'] = _deserializeLocation(lecture['location']);
+
           return lecture;
         }).toList();
       }, 'getLecturesBySubcategory');
@@ -1090,6 +1134,10 @@ class LocalRepository {
 
         final lecture = Map<String, dynamic>.from(results.first);
         lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
+
+        // Deserialize location JSON if present
+        lecture['location'] = _deserializeLocation(lecture['location']);
+
         return lecture;
       }, 'getLecture');
     } catch (e) {
@@ -1435,9 +1483,26 @@ class LocalRepository {
         // Normalize section to canonical key (e.g., 'الفقه' -> 'fiqh')
         final normalizedSection = _normalizeSectionKey(section);
 
+        // Serialize location to JSON if provided
+        String? locationJson;
+        if (location != null && location.isNotEmpty) {
+          try {
+            locationJson = jsonEncode(location);
+            developer.log(
+              '[LocalRepository] Serializing location: $locationJson',
+              name: 'addSheikhLecture',
+            );
+          } catch (e) {
+            developer.log(
+              '[LocalRepository] Error serializing location: $e',
+              name: 'addSheikhLecture',
+            );
+          }
+        }
+
         // Log the values being persisted for diagnostics
         developer.log(
-          '[LocalRepository] Adding lecture: section=$normalizedSection (original=$section), isPublished=1, status=published',
+          '[LocalRepository] Adding lecture: section=$normalizedSection (original=$section), isPublished=1, status=published, location=${location != null ? "provided" : "null"}',
           name: 'addSheikhLecture',
         );
 
@@ -1456,6 +1521,7 @@ class LocalRepository {
           'subcategoryName': subcategoryName,
           'startTime': startTime,
           'endTime': endTime,
+          'location': locationJson,
           'status': 'published',
           'isPublished': 1,
           'isDeleted': 0,
@@ -1555,6 +1621,10 @@ class LocalRepository {
         return results.map((row) {
           final lecture = Map<String, dynamic>.from(row);
           lecture['isPublished'] = (lecture['isPublished'] as int) == 1;
+
+          // Deserialize location JSON if present
+          lecture['location'] = _deserializeLocation(lecture['location']);
+
           return lecture;
         }).toList();
       }, 'getLecturesBySheikhAndCategory');
@@ -1588,6 +1658,23 @@ class LocalRepository {
 
         if (description != null) updateData['description'] = description;
         if (endTime != null) updateData['endTime'] = endTime;
+
+        // Update location if provided
+        if (location != null) {
+          try {
+            final locationJson = jsonEncode(location);
+            updateData['location'] = locationJson;
+            developer.log(
+              '[LocalRepository] Updating location: $locationJson',
+              name: 'updateSheikhLecture',
+            );
+          } catch (e) {
+            developer.log(
+              '[LocalRepository] Error serializing location: $e',
+              name: 'updateSheikhLecture',
+            );
+          }
+        }
 
         // Update video URL and videoId from media if provided
         if (media != null) {
@@ -1702,24 +1789,36 @@ class LocalRepository {
   }
 
   /// Check for overlapping lectures
+  /// Conflict exists ONLY when: sameSheikh AND sameCategory AND exact same timestamp
+  /// The timestamp includes: year, month, day, hour, and minute (full datetime precision)
+  /// This allows:
+  /// - Same sheikh, different category, same datetime → ✅ Allowed
+  /// - Different sheikh, same category, same datetime → ✅ Allowed
+  /// - Same sheikh, same category, different date (same time) → ✅ Allowed
+  /// - Same sheikh, same category, same date, different time → ✅ Allowed
+  /// - Same sheikh, same category, exact same datetime → ❌ Blocked
+  ///
+  /// Note: startTime is in milliseconds since epoch, which includes full date-time precision
   Future<bool> hasOverlappingLectures({
     required String sheikhId,
+    required String categoryId,
     required int startTime,
     int? endTime,
     String? excludeLectureId,
   }) async {
     try {
       return await _withRetry((db) async {
+        // Conflict condition: same sheikh + same category + exact same startTime (timestamp)
+        // This ensures full date-time precision: year, month, day, hour, minute are all matched
+        // startTime is stored as milliseconds since epoch, which includes complete datetime info
         String whereClause =
-            'sheikhId = ? AND isDeleted = ? AND ((startTime < ? AND (endTime IS NULL OR endTime > ?)) OR (startTime >= ? AND startTime < ?))';
+            'sheikhId = ? AND categoryId = ? AND isDeleted = ? AND startTime = ?';
 
         List<dynamic> whereArgs = [
           sheikhId,
+          categoryId,
           0,
-          endTime ?? startTime,
-          startTime,
-          startTime,
-          endTime ?? (startTime + 3600000), // Default 1 hour if no endTime
+          startTime, // Exact timestamp match (includes full date-time: year, month, day, hour, minute)
         ];
 
         if (excludeLectureId != null) {
@@ -1734,7 +1833,22 @@ class LocalRepository {
           limit: 1,
         );
 
-        return results.isNotEmpty;
+        final hasConflict = results.isNotEmpty;
+
+        // Convert timestamp to readable datetime for logging
+        final conflictDateTime = DateTime.fromMillisecondsSinceEpoch(
+          startTime,
+          isUtc: true,
+        );
+        final dateTimeStr =
+            '${conflictDateTime.year}-${conflictDateTime.month.toString().padLeft(2, '0')}-${conflictDateTime.day.toString().padLeft(2, '0')} ${conflictDateTime.hour.toString().padLeft(2, '0')}:${conflictDateTime.minute.toString().padLeft(2, '0')}';
+
+        developer.log(
+          '[LocalRepository] hasOverlappingLectures: sheikhId=$sheikhId, categoryId=$categoryId, startTime=$startTime ($dateTimeStr UTC), hasConflict=$hasConflict',
+          name: 'hasOverlappingLectures',
+        );
+
+        return hasConflict;
       }, 'hasOverlappingLectures');
     } catch (e) {
       developer.log(

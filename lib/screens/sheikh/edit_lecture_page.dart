@@ -319,6 +319,7 @@ class _EditLectureFormState extends State<EditLectureForm> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _locationController = TextEditingController();
+  final _locationUrlController = TextEditingController();
   final _audioUrlController = TextEditingController();
   final _videoUrlController = TextEditingController();
 
@@ -341,6 +342,11 @@ class _EditLectureFormState extends State<EditLectureForm> {
     final location = widget.lecture['location'] as Map<String, dynamic>?;
     if (location != null) {
       _locationController.text = location['label'] ?? '';
+      _locationUrlController.text =
+          location['url'] ??
+          location['locationUrl'] ??
+          location['googleMapsUrl'] ??
+          '';
     }
 
     // Load media URLs - check multiple sources
@@ -383,6 +389,7 @@ class _EditLectureFormState extends State<EditLectureForm> {
     _titleController.dispose();
     _descriptionController.dispose();
     _locationController.dispose();
+    _locationUrlController.dispose();
     _audioUrlController.dispose();
     _videoUrlController.dispose();
     super.dispose();
@@ -463,6 +470,8 @@ class _EditLectureFormState extends State<EditLectureForm> {
                   _buildSectionTitle('معلومات الموقع (اختياري)'),
                   const SizedBox(height: 12),
                   _buildLocationField(),
+                  const SizedBox(height: 16),
+                  _buildLocationUrlField(),
                   const SizedBox(height: 24),
 
                   // Media Information
@@ -720,12 +729,42 @@ class _EditLectureFormState extends State<EditLectureForm> {
     return TextFormField(
       controller: _locationController,
       decoration: InputDecoration(
-        labelText: 'الموقع',
-        hintText: 'أدخل موقع المحاضرة',
+        labelText: 'اسم الموقع',
+        hintText: 'أدخل اسم موقع المحاضرة',
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
         prefixIcon: const Icon(Icons.location_on),
       ),
     );
+  }
+
+  Widget _buildLocationUrlField() {
+    return TextFormField(
+      controller: _locationUrlController,
+      decoration: InputDecoration(
+        labelText: 'رابط الخريطة (Google Maps)',
+        hintText: 'أدخل رابط Google Maps أو الإحداثيات',
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        prefixIcon: const Icon(Icons.map),
+        helperText:
+            'يمكنك إدخال رابط Google Maps أو الإحداثيات (مثل: 24.7136,46.6753)',
+        helperMaxLines: 2,
+      ),
+      validator: (value) {
+        if (value != null &&
+            value.isNotEmpty &&
+            !_isValidUrl(value) &&
+            !_isValidCoordinates(value)) {
+          return 'رابط غير صحيح أو إحداثيات غير صحيحة';
+        }
+        return null;
+      },
+    );
+  }
+
+  bool _isValidCoordinates(String value) {
+    // Check if it's in format: lat,lng or lat, lng
+    final coordPattern = RegExp(r'^-?\d+\.?\d*,\s*-?\d+\.?\d*$');
+    return coordPattern.hasMatch(value.trim());
   }
 
   Widget _buildAudioUrlField() {
@@ -869,22 +908,30 @@ class _EditLectureFormState extends State<EditLectureForm> {
       listen: false,
     );
 
+    // Create DateTime with full date-time precision (year, month, day, hour, minute)
+    // Set seconds and milliseconds to 0 for exact matching
     final startDateTime = DateTime(
       _selectedStartDate?.year ?? DateTime.now().year,
       _selectedStartDate?.month ?? DateTime.now().month,
       _selectedStartDate?.day ?? DateTime.now().day,
       _selectedStartTime?.hour ?? TimeOfDay.now().hour,
       _selectedStartTime?.minute ?? TimeOfDay.now().minute,
+      0, // seconds = 0
+      0, // milliseconds = 0
     );
 
     DateTime? endDateTime;
     if (_hasEndTime && _selectedEndDate != null && _selectedEndTime != null) {
+      // Create DateTime with full date-time precision (year, month, day, hour, minute)
+      // Set seconds and milliseconds to 0 for exact matching
       endDateTime = DateTime(
         _selectedEndDate?.year ?? DateTime.now().year,
         _selectedEndDate?.month ?? DateTime.now().month,
         _selectedEndDate?.day ?? DateTime.now().day,
         _selectedEndTime?.hour ?? TimeOfDay.now().hour,
         _selectedEndTime?.minute ?? TimeOfDay.now().minute,
+        0, // seconds = 0
+        0, // milliseconds = 0
       );
     }
 
@@ -909,13 +956,35 @@ class _EditLectureFormState extends State<EditLectureForm> {
 
     // Prepare location data
     Map<String, dynamic>? location;
-    if (_locationController.text.isNotEmpty) {
-      location = {'label': _locationController.text};
+    if (_locationController.text.isNotEmpty ||
+        _locationUrlController.text.isNotEmpty) {
+      location = {};
+      if (_locationController.text.isNotEmpty) {
+        location['label'] = _locationController.text.trim();
+      }
+      if (_locationUrlController.text.isNotEmpty) {
+        location['url'] = _locationUrlController.text.trim();
+        // Also store as locationUrl for backward compatibility
+        location['locationUrl'] = _locationUrlController.text.trim();
+      }
+    }
+
+    // Get categoryId from lecture (required for conflict check)
+    final categoryId = widget.lecture['categoryId']?.toString() ?? '';
+    if (categoryId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('خطأ: لا يمكن تحديد الفئة للمحاضرة'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
     }
 
     final success = await lectureProvider.updateSheikhLecture(
       lectureId: widget.lecture['id'],
       sheikhId: authProvider.currentUid ?? '',
+      categoryId: categoryId,
       title: _titleController.text.trim(),
       description: _descriptionController.text.trim().isEmpty
           ? null

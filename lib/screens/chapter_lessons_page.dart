@@ -414,6 +414,15 @@ class _ChapterLessonsPageState extends State<ChapterLessonsPage> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Sheikh name
+            if (_getSheikhName(lecture) != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4.0),
+                child: Text(
+                  'الشيخ: ${_getSheikhName(lecture)}',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                ),
+              ),
             if (lecture['description'] != null &&
                 lecture['description'].toString().isNotEmpty)
               Padding(
@@ -459,6 +468,16 @@ class _ChapterLessonsPageState extends State<ChapterLessonsPage> {
         builder: (context) => LectureDetailScreen(lecture: lecture),
       ),
     );
+  }
+
+  String? _getSheikhName(Map<String, dynamic> lecture) {
+    // First try sheikhName field (stored with lecture)
+    final sheikhName = lecture['sheikhName']?.toString();
+    if (sheikhName != null && sheikhName.isNotEmpty && sheikhName != 'null') {
+      return sheikhName;
+    }
+    // Fallback: return null to hide the label (backward compatibility)
+    return null;
   }
 
   // Format DateTime for display
