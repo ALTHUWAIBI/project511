@@ -214,6 +214,7 @@ class MockLectureProvider extends LectureProvider {
   Future<bool> updateSheikhLecture({
     required String lectureId,
     required String sheikhId,
+    required String categoryId,
     required String title,
     String? description,
     required DateTime startTime,

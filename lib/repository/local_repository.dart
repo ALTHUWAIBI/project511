@@ -413,7 +413,7 @@ class LocalRepository {
 
   // ==================== Subcategory Management ====================
 
-  /// Get subcategories by section
+  /// Get subcategories by section (only non-deleted)
   Future<List<Map<String, dynamic>>> getSubcategoriesBySection(
     String section,
   ) async {
@@ -421,7 +421,7 @@ class LocalRepository {
       return await _withRetry((db) async {
         final results = await db.query(
           'subcategories',
-          where: 'section = ?',
+          where: 'section = ? AND (isDeleted IS NULL OR isDeleted = 0)',
           whereArgs: [section],
           orderBy: 'created_at ASC',
         );
@@ -444,7 +444,7 @@ class LocalRepository {
       return await _withRetry((db) async {
         final results = await db.query(
           'subcategories',
-          where: 'category_id = ?',
+          where: 'category_id = ? AND (isDeleted IS NULL OR isDeleted = 0)',
           whereArgs: [categoryId],
           orderBy: 'created_at ASC',
         );
@@ -600,21 +600,137 @@ class LocalRepository {
     }
   }
 
-  /// Delete subcategory
-  Future<bool> deleteSubcategory(String subcategoryId) async {
+  /// Soft delete subcategory (sets isDeleted = 1 and deletedAt = current time)
+  Future<Map<String, dynamic>> softDeleteSubcategory(
+    String subcategoryId,
+  ) async {
     try {
       return await _withRetry((db) async {
-        await db.delete(
+        final now = nowMillis();
+
+        // Soft delete the subcategory
+        final rowsAffected = await db.update(
           'subcategories',
-          where: 'id = ?',
+          {'isDeleted': 1, 'deletedAt': now},
+          where: 'id = ? AND (isDeleted IS NULL OR isDeleted = 0)',
           whereArgs: [subcategoryId],
         );
-        return true;
-      }, 'deleteSubcategory');
+
+        if (rowsAffected == 0) {
+          return {
+            'success': false,
+            'message': 'الفئة الفرعية غير موجودة أو محذوفة بالفعل',
+          };
+        }
+
+        // Soft delete all lectures in this subcategory
+        final lecturesAffected = await db.update(
+          'lectures',
+          {'isDeleted': 1, 'status': 'deleted', 'updatedAt': now},
+          where: 'subcategory_id = ? AND (isDeleted IS NULL OR isDeleted = 0)',
+          whereArgs: [subcategoryId],
+        );
+
+        developer.log(
+          '[LocalRepository] Soft deleted subcategory: $subcategoryId, affected $lecturesAffected lectures',
+          name: 'softDeleteSubcategory',
+        );
+
+        return {
+          'success': true,
+          'message': 'تم حذف الفئة الفرعية و${lecturesAffected} محاضرة بنجاح',
+          'lecturesAffected': lecturesAffected,
+        };
+      }, 'softDeleteSubcategory');
     } catch (e) {
-      developer.log('Delete subcategory error: $e', name: 'LocalRepository');
-      return false;
+      developer.log(
+        'Soft delete subcategory error: $e',
+        name: 'LocalRepository',
+      );
+      return {
+        'success': false,
+        'message': 'حدث خطأ أثناء حذف الفئة الفرعية: $e',
+      };
     }
+  }
+
+  /// Move lectures from one subcategory to another
+  Future<Map<String, dynamic>> moveLecturesToSubcategory(
+    String fromSubcategoryId,
+    String toSubcategoryId,
+  ) async {
+    try {
+      return await _withRetry((db) async {
+        // Get target subcategory name for logging
+        final targetSubcat = await db.query(
+          'subcategories',
+          where: 'id = ?',
+          whereArgs: [toSubcategoryId],
+          limit: 1,
+        );
+
+        if (targetSubcat.isEmpty) {
+          return {
+            'success': false,
+            'message': 'الفئة الفرعية الهدف غير موجودة',
+          };
+        }
+
+        final targetName = targetSubcat.first['name'] as String? ?? 'غير محدد';
+
+        // Get target subcategory's category_id and section for consistency
+        final targetCategoryId = targetSubcat.first['category_id'] as String?;
+        final targetSection = targetSubcat.first['section'] as String?;
+
+        // Update lectures: move to new subcategory
+        final now = nowMillis();
+        final lecturesAffected = await db.update(
+          'lectures',
+          {
+            'subcategory_id': toSubcategoryId,
+            'subcategoryName': targetName,
+            'categoryId': targetCategoryId,
+            'section': targetSection,
+            'updatedAt': now,
+          },
+          where: 'subcategory_id = ? AND (isDeleted IS NULL OR isDeleted = 0)',
+          whereArgs: [fromSubcategoryId],
+        );
+
+        // Now soft delete the source subcategory
+        await db.update(
+          'subcategories',
+          {'isDeleted': 1, 'deletedAt': now},
+          where: 'id = ? AND (isDeleted IS NULL OR isDeleted = 0)',
+          whereArgs: [fromSubcategoryId],
+        );
+
+        developer.log(
+          '[LocalRepository] Moved $lecturesAffected lectures from subcategory $fromSubcategoryId to $toSubcategoryId',
+          name: 'moveLecturesToSubcategory',
+        );
+
+        return {
+          'success': true,
+          'message': 'تم نقل $lecturesAffected محاضرة إلى "$targetName" بنجاح',
+          'lecturesAffected': lecturesAffected,
+          'targetSubcategoryName': targetName,
+        };
+      }, 'moveLecturesToSubcategory');
+    } catch (e) {
+      developer.log(
+        'Move lectures to subcategory error: $e',
+        name: 'LocalRepository',
+      );
+      return {'success': false, 'message': 'حدث خطأ أثناء نقل المحاضرات: $e'};
+    }
+  }
+
+  /// Delete subcategory (legacy method - now calls soft delete)
+  @Deprecated('Use softDeleteSubcategory or moveLecturesToSubcategory instead')
+  Future<bool> deleteSubcategory(String subcategoryId) async {
+    final result = await softDeleteSubcategory(subcategoryId);
+    return result['success'] == true;
   }
 
   // ==================== Lecture Management ====================

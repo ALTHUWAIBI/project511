@@ -751,21 +751,135 @@ class _SheikhHierarchyManageScreenState
       builder: (context) => Directionality(
         textDirection: TextDirection.rtl,
         child: AlertDialog(
-          title: const Text('تأكيد الحذف'),
+          title: const Text('حذف الفئة الفرعية؟'),
           content: Text(
-            'هل أنت متأكد من حذف الفئة الفرعية "${subcategory['name']}"؟',
+            'يمكنك نقل محاضراتها إلى فئة فرعية أخرى أو حذفها بالكامل.\n\n'
+            'الفئة الفرعية: "${subcategory['name']}"',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('إلغاء'),
             ),
-            ElevatedButton(
-              onPressed: () => _deleteSubcategory(subcategory['id']),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              child: const Text('حذف'),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _showMoveLecturesDialog(subcategory);
+              },
+              icon: const Icon(Icons.move_to_inbox, size: 18),
+              label: const Text('نقل المحاضرات'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _softDeleteSubcategory(subcategory['id']);
+              },
+              icon: const Icon(Icons.delete, size: 18),
+              label: const Text('حذف (ناعم)'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _showMoveLecturesDialog(Map<String, dynamic> subcategory) {
+    if (_selectedCategoryId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('يرجى اختيار فئة أولاً'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final hierarchyProvider = Provider.of<HierarchyProvider>(
+      context,
+      listen: false,
+    );
+
+    // Get all subcategories in the same category (excluding the one being deleted)
+    final allSubcategories = hierarchyProvider.subcategories
+        .where((subcat) => subcat['id'] != subcategory['id'])
+        .toList();
+
+    if (allSubcategories.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('لا توجد فئات فرعية أخرى لنقل المحاضرات إليها'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    String? selectedTargetId;
+
+    showDialog(
+      context: context,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            title: const Text('نقل المحاضرات'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'اختر الفئة الفرعية لنقل محاضرات "${subcategory['name']}" إليها:',
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 16),
+                  ...allSubcategories.map(
+                    (subcat) => RadioListTile<String>(
+                      title: Text(subcat['name'] ?? 'بدون اسم'),
+                      value: subcat['id'],
+                      groupValue: selectedTargetId,
+                      onChanged: (value) {
+                        setState(() {
+                          selectedTargetId = value;
+                        });
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('إلغاء'),
+              ),
+              ElevatedButton(
+                onPressed: selectedTargetId == null
+                    ? null
+                    : () {
+                        Navigator.pop(context);
+                        _moveLecturesToSubcategory(
+                          subcategory['id'],
+                          selectedTargetId!,
+                        );
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('نقل'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1013,23 +1127,96 @@ class _SheikhHierarchyManageScreenState
     }
   }
 
-  Future<void> _deleteSubcategory(String subcategoryId) async {
+  Future<void> _softDeleteSubcategory(String subcategoryId) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final hierarchyProvider = Provider.of<HierarchyProvider>(
       context,
       listen: false,
     );
 
-    final success = await hierarchyProvider.deleteSubcategory(subcategoryId);
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
 
-    if (success && mounted) {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تم حذف الفئة الفرعية بنجاح'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      _loadSubcategories();
+    final result = await hierarchyProvider.softDeleteSubcategory(
+      subcategoryId,
+      authProvider.currentUid,
+    );
+
+    if (mounted) {
+      Navigator.pop(context); // Close loading indicator
+
+      if (result['success']) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'تم حذف الفئة الفرعية بنجاح'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        _loadSubcategories();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'فشل حذف الفئة الفرعية'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _moveLecturesToSubcategory(
+    String fromSubcategoryId,
+    String toSubcategoryId,
+  ) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final hierarchyProvider = Provider.of<HierarchyProvider>(
+      context,
+      listen: false,
+    );
+
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final result = await hierarchyProvider.moveLecturesToSubcategory(
+      fromSubcategoryId,
+      toSubcategoryId,
+      authProvider.currentUid,
+    );
+
+    if (mounted) {
+      Navigator.pop(context); // Close loading indicator
+
+      if (result['success']) {
+        final targetName = result['targetSubcategoryName'] ?? 'الفئة المحددة';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result['message'] ?? 'تم نقل المحاضرات إلى "$targetName" بنجاح',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        _loadSubcategories();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'فشل نقل المحاضرات'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 

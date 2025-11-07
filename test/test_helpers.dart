@@ -159,6 +159,21 @@ class MockLectureProvider extends ChangeNotifier {
     // Mock implementation
   }
 
+  Future<bool> updateSheikhLecture({
+    required String lectureId,
+    required String sheikhId,
+    required String categoryId,
+    required String title,
+    String? description,
+    required DateTime startTime,
+    DateTime? endTime,
+    Map<String, dynamic>? location,
+    Map<String, dynamic>? media,
+  }) async {
+    // Mock successful update
+    return true;
+  }
+
   // Handle any missing methods
   @override
   dynamic noSuchMethod(Invocation invocation) {

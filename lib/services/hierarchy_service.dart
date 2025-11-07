@@ -144,15 +144,36 @@ class HierarchyService {
     );
   }
 
-  /// Delete subcategory
+  /// Soft delete subcategory and its lectures
+  Future<Map<String, dynamic>> softDeleteSubcategory(
+    String subcategoryId,
+  ) async {
+    try {
+      return await _repository.softDeleteSubcategory(subcategoryId);
+    } catch (e) {
+      return {'success': false, 'message': 'حدث خطأ في حذف الفئة الفرعية: $e'};
+    }
+  }
+
+  /// Move lectures from one subcategory to another, then soft delete source
+  Future<Map<String, dynamic>> moveLecturesToSubcategory(
+    String fromSubcategoryId,
+    String toSubcategoryId,
+  ) async {
+    try {
+      return await _repository.moveLecturesToSubcategory(
+        fromSubcategoryId,
+        toSubcategoryId,
+      );
+    } catch (e) {
+      return {'success': false, 'message': 'حدث خطأ في نقل المحاضرات: $e'};
+    }
+  }
+
+  /// Delete subcategory (legacy - now uses soft delete)
+  @Deprecated('Use softDeleteSubcategory or moveLecturesToSubcategory instead')
   Future<Map<String, dynamic>> deleteSubcategory(String subcategoryId) async {
-    final success = await _repository.deleteSubcategory(subcategoryId);
-    return {
-      'success': success,
-      'message': success
-          ? 'تم حذف الفئة الفرعية بنجاح'
-          : 'فشل حذف الفئة الفرعية',
-    };
+    return await softDeleteSubcategory(subcategoryId);
   }
 
   /// Get subcategories for a category

@@ -401,4 +401,19 @@ class MockLectureProvider extends ChangeNotifier {
   }) async {
     return true;
   }
+
+  Future<bool> updateSheikhLecture({
+    required String lectureId,
+    required String sheikhId,
+    required String categoryId,
+    required String title,
+    String? description,
+    required DateTime startTime,
+    DateTime? endTime,
+    Map<String, dynamic>? location,
+    Map<String, dynamic>? media,
+  }) async {
+    // Mock successful update
+    return true;
+  }
 }

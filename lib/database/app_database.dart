@@ -9,7 +9,8 @@ class AppDatabase {
   static final AppDatabase _instance = AppDatabase._internal();
   static Database? _database;
   static Future<void>? _initFuture;
-  static const int _currentVersion = 11; // Bumped for location JSON in lectures
+  static const int _currentVersion =
+      12; // Bumped for subcategory soft delete (isDeleted, deletedAt)
   static const String _dbName = 'main_app.db'; // Single canonical DB file name
 
   AppDatabase._internal();
@@ -285,6 +286,9 @@ class AppDatabase {
             break;
           case 11:
             await _migrationV11(db);
+            break;
+          case 12:
+            await _migrationV12(db);
             break;
           default:
             developer.log(
@@ -1138,6 +1142,48 @@ class AppDatabase {
     }
 
     developer.log('[AppDatabase] Migration v11 completed');
+  }
+
+  /// Migration v12: Add isDeleted and deletedAt columns to subcategories table
+  Future<void> _migrationV12(Database db) async {
+    developer.log(
+      '[AppDatabase] Applying migration v12: Add soft delete fields to subcategories',
+    );
+
+    try {
+      // Check if columns already exist
+      final columns = await db.rawQuery("PRAGMA table_info(subcategories)");
+      final hasIsDeleted = columns.any((col) => col['name'] == 'isDeleted');
+      final hasDeletedAt = columns.any((col) => col['name'] == 'deletedAt');
+
+      if (!hasIsDeleted) {
+        await db.execute(
+          'ALTER TABLE subcategories ADD COLUMN isDeleted INTEGER NOT NULL DEFAULT 0',
+        );
+        developer.log('[AppDatabase] Added isDeleted column to subcategories');
+      } else {
+        developer.log('[AppDatabase] isDeleted column already exists');
+      }
+
+      if (!hasDeletedAt) {
+        await db.execute(
+          'ALTER TABLE subcategories ADD COLUMN deletedAt INTEGER',
+        );
+        developer.log('[AppDatabase] Added deletedAt column to subcategories');
+      } else {
+        developer.log('[AppDatabase] deletedAt column already exists');
+      }
+
+      // Create index on isDeleted for performance
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_subcategories_isDeleted ON subcategories(isDeleted)',
+      );
+    } catch (e) {
+      developer.log('[AppDatabase] Error during v12 migration: $e');
+      rethrow;
+    }
+
+    developer.log('[AppDatabase] Migration v12 completed');
   }
 
   /// Ensure schema is applied - used for defensive retry

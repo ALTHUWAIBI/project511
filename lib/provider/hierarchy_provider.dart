@@ -334,29 +334,85 @@ class HierarchyProvider extends ChangeNotifier {
     }
   }
 
-  /// Delete subcategory
-  Future<bool> deleteSubcategory(String subcategoryId) async {
+  /// Soft delete subcategory and its lectures
+  Future<Map<String, dynamic>> softDeleteSubcategory(
+    String subcategoryId,
+    String? userId,
+  ) async {
     _setLoading(true);
     _setError(null);
 
     try {
-      final result = await _hierarchyService.deleteSubcategory(subcategoryId);
+      // Audit log
+      developer.log(
+        '[HierarchyProvider] Soft deleting subcategory: $subcategoryId by user: ${userId ?? "unknown"}',
+        name: 'softDeleteSubcategory',
+      );
+
+      final result = await _hierarchyService.softDeleteSubcategory(
+        subcategoryId,
+      );
 
       if (result['success']) {
         // Clear home hierarchy cache after deleting subcategory
         clearHomeHierarchyCache();
         _setLoading(false);
-        return true;
+        return result;
       } else {
         _setLoading(false);
         _setError(result['message']);
-        return false;
+        return result;
       }
     } catch (e) {
       _setLoading(false);
       _setError('حدث خطأ في حذف الفئة الفرعية: $e');
-      return false;
+      return {'success': false, 'message': 'حدث خطأ في حذف الفئة الفرعية: $e'};
     }
+  }
+
+  /// Move lectures from one subcategory to another, then soft delete source
+  Future<Map<String, dynamic>> moveLecturesToSubcategory(
+    String fromSubcategoryId,
+    String toSubcategoryId,
+    String? userId,
+  ) async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      // Audit log
+      developer.log(
+        '[HierarchyProvider] Moving lectures from subcategory: $fromSubcategoryId to: $toSubcategoryId by user: ${userId ?? "unknown"}',
+        name: 'moveLecturesToSubcategory',
+      );
+
+      final result = await _hierarchyService.moveLecturesToSubcategory(
+        fromSubcategoryId,
+        toSubcategoryId,
+      );
+
+      if (result['success']) {
+        // Clear home hierarchy cache after moving lectures
+        clearHomeHierarchyCache();
+        _setLoading(false);
+        return result;
+      } else {
+        _setLoading(false);
+        _setError(result['message']);
+        return result;
+      }
+    } catch (e) {
+      _setLoading(false);
+      _setError('حدث خطأ في نقل المحاضرات: $e');
+      return {'success': false, 'message': 'حدث خطأ في نقل المحاضرات: $e'};
+    }
+  }
+
+  /// Delete subcategory (legacy - now uses soft delete)
+  @Deprecated('Use softDeleteSubcategory or moveLecturesToSubcategory instead')
+  Future<bool> deleteSubcategory(String subcategoryId) async {
+    final result = await softDeleteSubcategory(subcategoryId, null);
+    return result['success'] == true;
   }
 
   // ==================== Lectures Management ====================
