@@ -6,6 +6,8 @@ import 'package:new_project/provider/hierarchy_provider.dart';
 import 'package:new_project/widgets/sheikh_guard.dart';
 import 'package:new_project/utils/youtube_utils.dart';
 import 'package:new_project/widgets/youtube_player_widget.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 import 'dart:developer' as developer;
 
 class AddLectureForm extends StatefulWidget {
@@ -23,6 +25,7 @@ class _AddLectureFormState extends State<AddLectureForm> {
   final _locationUrlController = TextEditingController();
   final _audioUrlController = TextEditingController();
   final _videoUrlController = TextEditingController();
+  final _pdfUrlController = TextEditingController();
 
   DateTime? _selectedStartDate;
   TimeOfDay? _selectedStartTime;
@@ -40,6 +43,10 @@ class _AddLectureFormState extends State<AddLectureForm> {
   String? _selectedCategoryName;
   String? _selectedSubcategoryId;
   String? _selectedSubcategoryName;
+
+  // PDF attachment state
+  File? _selectedPdfFile;
+  String? _pdfFileName;
 
   @override
   void initState() {
@@ -82,6 +89,7 @@ class _AddLectureFormState extends State<AddLectureForm> {
     _locationUrlController.dispose();
     _audioUrlController.dispose();
     _videoUrlController.dispose();
+    _pdfUrlController.dispose();
     super.dispose();
   }
 
@@ -170,6 +178,8 @@ class _AddLectureFormState extends State<AddLectureForm> {
                   _buildAudioUrlField(),
                   const SizedBox(height: 16),
                   _buildVideoUrlField(),
+                  const SizedBox(height: 16),
+                  _buildPdfField(),
                   const SizedBox(height: 32),
 
                   // Error Message
@@ -766,6 +776,151 @@ class _AddLectureFormState extends State<AddLectureForm> {
     );
   }
 
+  Widget _buildPdfField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          controller: _pdfUrlController,
+          decoration: InputDecoration(
+            labelText: 'رابط PDF (اختياري)',
+            hintText: 'أدخل رابط ملف PDF',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            prefixIcon: const Icon(Icons.picture_as_pdf),
+            suffixIcon: _pdfUrlController.text.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: () {
+                      setState(() {
+                        _pdfUrlController.clear();
+                      });
+                    },
+                  )
+                : null,
+          ),
+          validator: (value) {
+            if (value != null && value.isNotEmpty && !_isValidUrl(value)) {
+              return 'رابط غير صحيح';
+            }
+            return null;
+          },
+          onChanged: (value) {
+            setState(() {
+              // Clear file selection if URL is entered
+              if (value.isNotEmpty) {
+                _selectedPdfFile = null;
+                _pdfFileName = null;
+              }
+            });
+          },
+        ),
+        const SizedBox(height: 12),
+        // File upload option
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _pickPdfFile,
+                icon: const Icon(Icons.upload_file),
+                label: const Text('رفع ملف PDF'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+            if (_selectedPdfFile != null || _pdfFileName != null) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.picture_as_pdf,
+                        color: Colors.green[700],
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _pdfFileName ??
+                              _selectedPdfFile?.path.split('/').last ??
+                              'ملف PDF',
+                          style: TextStyle(
+                            color: Colors.green[700],
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        color: Colors.red,
+                        onPressed: () {
+                          setState(() {
+                            _selectedPdfFile = null;
+                            _pdfFileName = null;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        if (_selectedPdfFile != null || _pdfFileName != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            'ملاحظة: سيتم استخدام الملف المرفوع بدلاً من الرابط',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[600],
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _pickPdfFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+        allowMultiple: false,
+      );
+
+      if (result != null && result.files.single.path != null) {
+        setState(() {
+          _selectedPdfFile = File(result.files.single.path ?? '');
+          _pdfFileName = result.files.single.name;
+          // Clear URL if file is selected
+          _pdfUrlController.clear();
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('خطأ في اختيار الملف: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _selectStartDateTime() async {
     final date = await showDatePicker(
       context: context,
@@ -990,7 +1145,9 @@ class _AddLectureFormState extends State<AddLectureForm> {
     // Prepare media data with URL validation
     Map<String, dynamic>? media;
     if (_audioUrlController.text.isNotEmpty ||
-        _videoUrlController.text.isNotEmpty) {
+        _videoUrlController.text.isNotEmpty ||
+        _pdfUrlController.text.isNotEmpty ||
+        _selectedPdfFile != null) {
       media = {};
       if (_audioUrlController.text.isNotEmpty) {
         final audioUrl = _audioUrlController.text.trim();
@@ -1012,6 +1169,26 @@ class _AddLectureFormState extends State<AddLectureForm> {
         if (videoId != null) {
           media['videoId'] = videoId;
         }
+      }
+      // Add PDF attachment (prefer file over URL)
+      if (_selectedPdfFile != null) {
+        // Store file path for local storage (can be uploaded to Firebase Storage later)
+        media['pdfUrl'] = _selectedPdfFile!.path;
+        media['pdfFileName'] = _pdfFileName;
+        media['pdfType'] = 'file';
+      } else if (_pdfUrlController.text.isNotEmpty) {
+        final pdfUrl = _pdfUrlController.text.trim();
+        if (!_isValidUrl(pdfUrl)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('صيغة رابط PDF غير صحيحة'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
+        media['pdfUrl'] = pdfUrl;
+        media['pdfType'] = 'url';
       }
     }
 

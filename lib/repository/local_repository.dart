@@ -1596,6 +1596,16 @@ class LocalRepository {
           }
         }
 
+        // Extract PDF data from media if provided
+        String? pdfUrl;
+        String? pdfFileName;
+        String? pdfType;
+        if (media != null) {
+          pdfUrl = media['pdfUrl']?.toString();
+          pdfFileName = media['pdfFileName']?.toString();
+          pdfType = media['pdfType']?.toString();
+        }
+
         // Normalize section to canonical key (e.g., 'الفقه' -> 'fiqh')
         final normalizedSection = _normalizeSectionKey(section);
 
@@ -1638,6 +1648,9 @@ class LocalRepository {
           'startTime': startTime,
           'endTime': endTime,
           'location': locationJson,
+          'pdfUrl': pdfUrl,
+          'pdfFileName': pdfFileName,
+          'pdfType': pdfType,
           'status': 'published',
           'isPublished': 1,
           'isDeleted': 0,
@@ -1772,27 +1785,49 @@ class LocalRepository {
           'updatedAt': nowMillis(),
         };
 
-        if (description != null) updateData['description'] = description;
-        if (endTime != null) updateData['endTime'] = endTime;
+        // Always update description (can be empty string to clear it)
+        if (description != null) {
+          updateData['description'] = description;
+        } else {
+          updateData['description'] = '';
+        }
 
-        // Update location if provided
+        // Handle endTime - if null, clear it; otherwise set it
+        if (endTime != null) {
+          updateData['endTime'] = endTime;
+        } else {
+          updateData['endTime'] = null;
+        }
+
+        // Update location - if provided (even if empty), serialize it; if null, clear it
         if (location != null) {
-          try {
-            final locationJson = jsonEncode(location);
-            updateData['location'] = locationJson;
+          if (location.isEmpty) {
+            // Clear location if empty map is provided
+            updateData['location'] = null;
             developer.log(
-              '[LocalRepository] Updating location: $locationJson',
+              '[LocalRepository] Clearing location',
               name: 'updateSheikhLecture',
             );
-          } catch (e) {
-            developer.log(
-              '[LocalRepository] Error serializing location: $e',
-              name: 'updateSheikhLecture',
-            );
+          } else {
+            try {
+              final locationJson = jsonEncode(location);
+              updateData['location'] = locationJson;
+              developer.log(
+                '[LocalRepository] Updating location: $locationJson',
+                name: 'updateSheikhLecture',
+              );
+            } catch (e) {
+              developer.log(
+                '[LocalRepository] Error serializing location: $e',
+                name: 'updateSheikhLecture',
+              );
+            }
           }
         }
 
-        // Update video URL and videoId from media if provided
+        // Handle media - extract all fields (audio, video, PDF)
+        // Note: audioUrl is not stored as a direct column, so it's handled in the media object
+        // which is reconstructed when reading lectures
         if (media != null) {
           // Extract videoUrl (preferred) or video_path (fallback)
           final videoUrl =
@@ -1808,24 +1843,68 @@ class LocalRepository {
             videoId = YouTubeUtils.extractVideoId(videoUrl);
           }
 
-          // Store both video_path (for backward compatibility) and videoId
+          // Update video fields - always update (even if empty to clear)
           if (videoUrl != null && videoUrl.isNotEmpty) {
             updateData['video_path'] = videoUrl;
             if (videoId != null && videoId.isNotEmpty) {
               updateData['videoId'] = videoId;
+            } else {
+              updateData['videoId'] = '';
             }
           } else {
             // If videoUrl is cleared, also clear videoId and video_path
             updateData['video_path'] = '';
             updateData['videoId'] = '';
           }
+
+          // Extract and update PDF fields
+          final pdfUrl = media['pdfUrl']?.toString();
+          final pdfFileName = media['pdfFileName']?.toString();
+          final pdfType = media['pdfType']?.toString();
+
+          if (pdfUrl != null && pdfUrl.isNotEmpty) {
+            updateData['pdfUrl'] = pdfUrl;
+            if (pdfFileName != null && pdfFileName.isNotEmpty) {
+              updateData['pdfFileName'] = pdfFileName;
+            } else {
+              updateData['pdfFileName'] = null;
+            }
+            if (pdfType != null && pdfType.isNotEmpty) {
+              updateData['pdfType'] = pdfType;
+            } else {
+              // Default to 'url' if type not specified
+              updateData['pdfType'] = 'url';
+            }
+          } else {
+            // Clear PDF fields if pdfUrl is empty or not provided
+            updateData['pdfUrl'] = null;
+            updateData['pdfFileName'] = null;
+            updateData['pdfType'] = null;
+          }
         }
 
-        await db.update(
+        // Execute the update and check if any rows were affected
+        final rowsAffected = await db.update(
           'lectures',
           updateData,
           where: 'id = ? AND sheikhId = ?',
           whereArgs: [lectureId, sheikhId],
+        );
+
+        if (rowsAffected == 0) {
+          developer.log(
+            '[LocalRepository] No rows updated for lecture $lectureId',
+            name: 'updateSheikhLecture',
+          );
+          return {
+            'success': false,
+            'message': 'لم يتم العثور على المحاضرة أو لا توجد صلاحية للتعديل',
+          };
+        }
+
+        developer.log(
+          '[LocalRepository] Successfully updated lecture $lectureId (rows affected: $rowsAffected)',
+          name: 'updateSheikhLecture',
         );
 
         return {'success': true, 'message': 'تم تحديث المحاضرة بنجاح'};

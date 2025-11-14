@@ -5,6 +5,9 @@ import 'dart:developer' as developer;
 class LectureProvider extends ChangeNotifier {
   final LocalRepository _repository = LocalRepository();
 
+  // Limit for "Recently Added" section
+  static const int kRecentLecturesLimit = 2;
+
   List<Map<String, dynamic>> _allLectures = [];
   List<Map<String, dynamic>> _fiqhLectures = [];
   List<Map<String, dynamic>> _hadithLectures = [];
@@ -23,9 +26,63 @@ class LectureProvider extends ChangeNotifier {
   List<Map<String, dynamic>> get tafsirLectures => _tafsirLectures;
   List<Map<String, dynamic>> get seerahLectures => _seerahLectures;
 
-  // Get recent lectures (limit to 5)
+  /// Extract timestamp from lecture (prefer createdAt, then updatedAt, then startTime)
+  int? _getLectureTimestamp(Map<String, dynamic> lecture) {
+    // Try createdAt first
+    if (lecture['createdAt'] != null) {
+      if (lecture['createdAt'] is int) {
+        return lecture['createdAt'] as int;
+      }
+      if (lecture['createdAt'] is String) {
+        return int.tryParse(lecture['createdAt'].toString());
+      }
+    }
+
+    // Fallback to updatedAt
+    if (lecture['updatedAt'] != null) {
+      if (lecture['updatedAt'] is int) {
+        return lecture['updatedAt'] as int;
+      }
+      if (lecture['updatedAt'] is String) {
+        return int.tryParse(lecture['updatedAt'].toString());
+      }
+    }
+
+    // Fallback to startTime
+    if (lecture['startTime'] != null) {
+      if (lecture['startTime'] is int) {
+        return lecture['startTime'] as int;
+      }
+      if (lecture['startTime'] is String) {
+        return int.tryParse(lecture['startTime'].toString());
+      }
+    }
+
+    return null;
+  }
+
+  // Get recent lectures (limited to kRecentLecturesLimit, sorted by createdAt/updatedAt/startTime)
   List<Map<String, dynamic>> get recentLectures {
-    return _allLectures.take(5).toList();
+    if (_allLectures.isEmpty) {
+      return [];
+    }
+
+    // Sort lectures by timestamp (prefer createdAt, then updatedAt, then startTime)
+    final sortedLectures = List<Map<String, dynamic>>.from(_allLectures);
+    sortedLectures.sort((a, b) {
+      final timestampA = _getLectureTimestamp(a);
+      final timestampB = _getLectureTimestamp(b);
+
+      // Sort descending (newest first)
+      // If timestamp is null, put it at the end
+      if (timestampA == null && timestampB == null) return 0;
+      if (timestampA == null) return 1; // a goes to end
+      if (timestampB == null) return -1; // b goes to end
+      return timestampB.compareTo(timestampA); // Descending order
+    });
+
+    // Return only the most recent N lectures
+    return sortedLectures.take(kRecentLecturesLimit).toList();
   }
 
   // Set loading state
@@ -485,6 +542,10 @@ class LectureProvider extends ChangeNotifier {
         // Reload sheikh lectures and stats
         await loadSheikhLectures(sheikhId);
         await loadSheikhStats(sheikhId);
+        // Also reload all lectures for home page visibility
+        await loadAllLectures();
+        // Reload all sections to ensure UI is updated everywhere
+        await loadAllSections();
         _setLoading(false);
         return true;
       } else {

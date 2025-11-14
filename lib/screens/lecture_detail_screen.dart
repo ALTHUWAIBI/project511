@@ -3,6 +3,9 @@ import 'package:new_project/widgets/youtube_player_widget.dart';
 import 'package:new_project/widgets/audio_player_widget.dart';
 import 'package:new_project/utils/youtube_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:open_filex/open_filex.dart';
+import 'dart:io';
+import 'dart:convert';
 
 /// Dedicated screen for viewing lecture details with video playback
 /// Replaces Dialog to avoid platform view clipping issues
@@ -20,6 +23,47 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
   VoidCallback? _pauseVideo;
   VoidCallback? _pauseAudio;
 
+  /// Safely parse a value that could be a Map, JSON string, or null into a Map
+  Map<String, dynamic>? _safeParseMap(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+
+    // If it's already a Map, return it directly
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+
+    // If it's a Map but not typed, try to cast it
+    if (value is Map) {
+      try {
+        return Map<String, dynamic>.from(value);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // If it's a String, try to parse it as JSON
+    if (value is String) {
+      if (value.isEmpty || value == 'null') {
+        return null;
+      }
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is Map) {
+          return Map<String, dynamic>.from(decoded);
+        }
+        return null;
+      } catch (e) {
+        // JSON parsing failed, return null
+        return null;
+      }
+    }
+
+    // Unknown type, return null
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final title = widget.lecture['title']?.toString() ?? 'بدون عنوان';
@@ -27,7 +71,8 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
     final section = widget.lecture['section']?.toString() ?? '';
     final startTime = widget.lecture['startTime'];
     final endTime = widget.lecture['endTime'];
-    final location = widget.lecture['location'] as Map<String, dynamic>?;
+    // Safely parse location - could be Map, JSON string, or null
+    final location = _safeParseMap(widget.lecture['location']);
 
     // Extract videoId - only check videoId, not other fields
     final videoId = widget.lecture['videoId']?.toString();
@@ -39,6 +84,11 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
     final audioUrl =
         widget.lecture['media']?['audioUrl']?.toString() ??
         widget.lecture['audioUrl']?.toString();
+
+    // Extract PDF attachment
+    final pdfUrl = widget.lecture['pdfUrl']?.toString();
+    final pdfFileName = widget.lecture['pdfFileName']?.toString();
+    final hasPdf = pdfUrl != null && pdfUrl.isNotEmpty;
 
     // Only show player if videoId exists (extract from URL if needed)
     String? resolvedVideoId = videoId;
@@ -203,7 +253,72 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
                 const SizedBox(height: 12),
               ],
 
-              // Location with Google Maps link - placed after audio
+              // PDF attachment - if PDF exists, placed after audio
+              if (hasPdf) ...[
+                // PDF title label
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.picture_as_pdf,
+                        color: Colors.red[700],
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'ملف PDF',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (pdfFileName != null && pdfFileName.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8.0),
+                            child: Text(
+                              pdfFileName,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => _openPdf(),
+                            icon: const Icon(Icons.picture_as_pdf),
+                            label: const Text('فتح ملف PDF'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                              side: const BorderSide(color: Colors.red),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // Location with Google Maps link - placed after audio/PDF
               if (location != null) ...[
                 _buildLocationCard(location),
                 const SizedBox(height: 12),
@@ -434,6 +549,55 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('حدث خطأ أثناء فتح الخريطة'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _openPdf() async {
+    final pdfUrl = widget.lecture['pdfUrl']?.toString();
+    final pdfType = widget.lecture['pdfType']?.toString();
+
+    if (pdfUrl == null || pdfUrl.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('لا يوجد ملف PDF متاح'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      if (pdfType == 'file') {
+        // For local files, use open_filex to avoid FileUriExposedException on Android 7+
+        final file = File(pdfUrl);
+        if (await file.exists()) {
+          final result = await OpenFilex.open(pdfUrl);
+          if (result.type != ResultType.done) {
+            throw Exception('Cannot open PDF file: ${result.message}');
+          }
+        } else {
+          throw Exception('PDF file not found');
+        }
+      } else {
+        // For URLs, use url_launcher
+        final uri = Uri.parse(pdfUrl);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw Exception('Cannot launch URL');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('حدث خطأ أثناء فتح ملف PDF: $e'),
             backgroundColor: Colors.red,
           ),
         );

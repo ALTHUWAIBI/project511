@@ -4,6 +4,9 @@ import 'package:new_project/provider/hierarchy_provider.dart';
 import 'package:new_project/utils/youtube_utils.dart';
 import 'package:new_project/screens/lecture_detail_screen.dart';
 import 'package:new_project/offline/firestore_shims.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:open_filex/open_filex.dart';
+import 'dart:io';
 import '../widgets/app_drawer.dart';
 
 class LecturesListPage extends StatefulWidget {
@@ -202,6 +205,10 @@ class _LecturesListPageState extends State<LecturesListPage> {
             videoUrl.isNotEmpty &&
             YouTubeUtils.extractVideoId(videoUrl) != null);
 
+    // Check for PDF attachment
+    final pdfUrl = lecture['pdfUrl']?.toString();
+    final hasPdf = pdfUrl != null && pdfUrl.isNotEmpty;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -253,6 +260,16 @@ class _LecturesListPageState extends State<LecturesListPage> {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (hasPdf)
+              GestureDetector(
+                onTap: () => _openPdf(lecture),
+                child: const Icon(
+                  Icons.picture_as_pdf,
+                  color: Colors.red,
+                  size: 24,
+                ),
+              ),
+            if (hasPdf) const SizedBox(width: 8),
             if (hasVideo)
               const Icon(Icons.play_circle_filled, color: Colors.red, size: 24)
             else
@@ -301,6 +318,53 @@ class _LecturesListPageState extends State<LecturesListPage> {
       return '${dateTime.day}/${dateTime.month}/${dateTime.year} - ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
     } catch (e) {
       return 'غير محدد';
+    }
+  }
+
+  Future<void> _openPdf(Map<String, dynamic> lecture) async {
+    final pdfUrl = lecture['pdfUrl']?.toString();
+    final pdfType = lecture['pdfType']?.toString();
+
+    if (pdfUrl == null || pdfUrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('لا يوجد ملف PDF متاح'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    try {
+      if (pdfType == 'file') {
+        // For local files, use open_filex to avoid FileUriExposedException on Android 7+
+        final file = File(pdfUrl);
+        if (await file.exists()) {
+          final result = await OpenFilex.open(pdfUrl);
+          if (result.type != ResultType.done) {
+            throw Exception('Cannot open PDF file: ${result.message}');
+          }
+        } else {
+          throw Exception('PDF file not found');
+        }
+      } else {
+        // For URLs, use url_launcher
+        final uri = Uri.parse(pdfUrl);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw Exception('Cannot launch URL');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('حدث خطأ أثناء فتح ملف PDF: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 }

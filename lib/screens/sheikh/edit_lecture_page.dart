@@ -6,6 +6,9 @@ import 'package:new_project/provider/hierarchy_provider.dart';
 import 'package:new_project/widgets/sheikh_guard.dart';
 import 'package:new_project/utils/time.dart';
 import 'package:new_project/utils/youtube_utils.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
+import 'dart:convert';
 
 class EditLecturePage extends StatefulWidget {
   const EditLecturePage({super.key});
@@ -322,6 +325,11 @@ class _EditLectureFormState extends State<EditLectureForm> {
   final _locationUrlController = TextEditingController();
   final _audioUrlController = TextEditingController();
   final _videoUrlController = TextEditingController();
+  final _pdfUrlController = TextEditingController();
+
+  // PDF attachment state
+  File? _selectedPdfFile;
+  String? _pdfFileName;
 
   DateTime? _selectedStartDate;
   TimeOfDay? _selectedStartTime;
@@ -335,31 +343,88 @@ class _EditLectureFormState extends State<EditLectureForm> {
     _initializeForm();
   }
 
+  /// Safely parse a value that could be a Map, JSON string, or null into a Map
+  Map<String, dynamic>? _safeParseMap(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+
+    // If it's already a Map, return it directly
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+
+    // If it's a Map but not typed, try to cast it
+    if (value is Map) {
+      try {
+        return Map<String, dynamic>.from(value);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // If it's a String, try to parse it as JSON
+    if (value is String) {
+      if (value.isEmpty || value == 'null') {
+        return null;
+      }
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is Map) {
+          return Map<String, dynamic>.from(decoded);
+        }
+        return null;
+      } catch (e) {
+        // JSON parsing failed, return null
+        return null;
+      }
+    }
+
+    // Unknown type, return null
+    return null;
+  }
+
   void _initializeForm() {
     _titleController.text = widget.lecture['title'] ?? '';
     _descriptionController.text = widget.lecture['description'] ?? '';
 
-    final location = widget.lecture['location'] as Map<String, dynamic>?;
-    if (location != null) {
-      _locationController.text = location['label'] ?? '';
+    // Safely parse location - could be Map, JSON string, or null
+    final location = _safeParseMap(widget.lecture['location']);
+    if (location != null && location.isNotEmpty) {
+      _locationController.text = location['label']?.toString() ?? '';
       _locationUrlController.text =
-          location['url'] ??
-          location['locationUrl'] ??
-          location['googleMapsUrl'] ??
+          location['url']?.toString() ??
+          location['locationUrl']?.toString() ??
+          location['googleMapsUrl']?.toString() ??
           '';
     }
 
-    // Load media URLs - check multiple sources
-    final media = widget.lecture['media'] as Map<String, dynamic>?;
-    if (media != null) {
-      _audioUrlController.text = media['audioUrl'] ?? '';
+    // Load media URLs - safely parse media (could be Map, JSON string, or null)
+    final media = _safeParseMap(widget.lecture['media']);
+    if (media != null && media.isNotEmpty) {
+      _audioUrlController.text = media['audioUrl']?.toString() ?? '';
       // Check videoUrl in media, or video_path, or construct from videoId
       _videoUrlController.text =
-          media['videoUrl'] ??
+          media['videoUrl']?.toString() ??
           widget.lecture['video_path']?.toString() ??
           (widget.lecture['videoId'] != null
               ? YouTubeUtils.getWatchUrl(widget.lecture['videoId'].toString())
               : '');
+
+      // Load PDF data from media object
+      final pdfUrl = media['pdfUrl']?.toString();
+      final pdfType = media['pdfType']?.toString();
+      if (pdfUrl != null && pdfUrl.isNotEmpty) {
+        if (pdfType == 'file') {
+          // For local files, set the file path and name
+          _selectedPdfFile = File(pdfUrl);
+          _pdfFileName =
+              media['pdfFileName']?.toString() ?? pdfUrl.split('/').last;
+        } else {
+          // For URLs, set the URL controller
+          _pdfUrlController.text = pdfUrl;
+        }
+      }
     } else {
       // If no media object, check direct fields
       _videoUrlController.text =
@@ -367,6 +432,20 @@ class _EditLectureFormState extends State<EditLectureForm> {
           (widget.lecture['videoId'] != null
               ? YouTubeUtils.getWatchUrl(widget.lecture['videoId'].toString())
               : '');
+
+      // Check for PDF in direct lecture fields (from database columns)
+      final pdfUrl = widget.lecture['pdfUrl']?.toString();
+      final pdfType = widget.lecture['pdfType']?.toString();
+      if (pdfUrl != null && pdfUrl.isNotEmpty) {
+        if (pdfType == 'file') {
+          _selectedPdfFile = File(pdfUrl);
+          _pdfFileName =
+              widget.lecture['pdfFileName']?.toString() ??
+              pdfUrl.split('/').last;
+        } else {
+          _pdfUrlController.text = pdfUrl;
+        }
+      }
     }
 
     // Use safe date conversion - handles Timestamp, int (epoch ms), String, DateTime
@@ -392,6 +471,7 @@ class _EditLectureFormState extends State<EditLectureForm> {
     _locationUrlController.dispose();
     _audioUrlController.dispose();
     _videoUrlController.dispose();
+    _pdfUrlController.dispose();
     super.dispose();
   }
 
@@ -480,6 +560,8 @@ class _EditLectureFormState extends State<EditLectureForm> {
                   _buildAudioUrlField(),
                   const SizedBox(height: 16),
                   _buildVideoUrlField(),
+                  const SizedBox(height: 16),
+                  _buildPdfField(),
                   const SizedBox(height: 32),
 
                   // Error Message
@@ -803,6 +885,151 @@ class _EditLectureFormState extends State<EditLectureForm> {
     );
   }
 
+  Widget _buildPdfField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          controller: _pdfUrlController,
+          decoration: InputDecoration(
+            labelText: 'رابط PDF (اختياري)',
+            hintText: 'أدخل رابط ملف PDF',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            prefixIcon: const Icon(Icons.picture_as_pdf),
+            suffixIcon: _pdfUrlController.text.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: () {
+                      setState(() {
+                        _pdfUrlController.clear();
+                      });
+                    },
+                  )
+                : null,
+          ),
+          validator: (value) {
+            if (value != null && value.isNotEmpty && !_isValidUrl(value)) {
+              return 'رابط غير صحيح';
+            }
+            return null;
+          },
+          onChanged: (value) {
+            setState(() {
+              // Clear file selection if URL is entered
+              if (value.isNotEmpty) {
+                _selectedPdfFile = null;
+                _pdfFileName = null;
+              }
+            });
+          },
+        ),
+        const SizedBox(height: 12),
+        // File upload option
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _pickPdfFile,
+                icon: const Icon(Icons.upload_file),
+                label: const Text('رفع ملف PDF'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+            if (_selectedPdfFile != null || _pdfFileName != null) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.picture_as_pdf,
+                        color: Colors.green[700],
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _pdfFileName ??
+                              _selectedPdfFile?.path.split('/').last ??
+                              'ملف PDF',
+                          style: TextStyle(
+                            color: Colors.green[700],
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        color: Colors.red,
+                        onPressed: () {
+                          setState(() {
+                            _selectedPdfFile = null;
+                            _pdfFileName = null;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        if (_selectedPdfFile != null || _pdfFileName != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            'ملاحظة: سيتم استخدام الملف المرفوع بدلاً من الرابط',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[600],
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _pickPdfFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+        allowMultiple: false,
+      );
+
+      if (result != null && result.files.single.path != null) {
+        setState(() {
+          _selectedPdfFile = File(result.files.single.path ?? '');
+          _pdfFileName = result.files.single.name;
+          // Clear URL if file is selected
+          _pdfUrlController.clear();
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('خطأ في اختيار الملف: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _selectStartDateTime() async {
     final date = await showDatePicker(
       context: context,
@@ -935,38 +1162,51 @@ class _EditLectureFormState extends State<EditLectureForm> {
       );
     }
 
-    // Prepare media data with videoId extraction
-    Map<String, dynamic>? media;
-    if (_audioUrlController.text.isNotEmpty ||
-        _videoUrlController.text.isNotEmpty) {
-      media = {};
-      if (_audioUrlController.text.isNotEmpty) {
-        media['audioUrl'] = _audioUrlController.text.trim();
-      }
-      if (_videoUrlController.text.isNotEmpty) {
-        final videoUrl = _videoUrlController.text.trim();
-        media['videoUrl'] = videoUrl;
-        // Extract videoId from URL
-        final videoId = YouTubeUtils.extractVideoId(videoUrl);
-        if (videoId != null) {
-          media['videoId'] = videoId;
-        }
+    // Prepare media data with videoId extraction and PDF support
+    // Always create media map to ensure we can clear fields if needed
+    Map<String, dynamic> media = {};
+    if (_audioUrlController.text.isNotEmpty) {
+      media['audioUrl'] = _audioUrlController.text.trim();
+    }
+    if (_videoUrlController.text.isNotEmpty) {
+      final videoUrl = _videoUrlController.text.trim();
+      media['videoUrl'] = videoUrl;
+      // Extract videoId from URL
+      final videoId = YouTubeUtils.extractVideoId(videoUrl);
+      if (videoId != null) {
+        media['videoId'] = videoId;
       }
     }
+    // Add PDF attachment (prefer file over URL)
+    if (_selectedPdfFile != null) {
+      // Store file path for local storage
+      media['pdfUrl'] = _selectedPdfFile!.path;
+      media['pdfFileName'] = _pdfFileName;
+      media['pdfType'] = 'file';
+    } else if (_pdfUrlController.text.isNotEmpty) {
+      final pdfUrl = _pdfUrlController.text.trim();
+      if (!_isValidUrl(pdfUrl)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('صيغة رابط PDF غير صحيحة'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+      media['pdfUrl'] = pdfUrl;
+      media['pdfType'] = 'url';
+    }
 
-    // Prepare location data
-    Map<String, dynamic>? location;
-    if (_locationController.text.isNotEmpty ||
-        _locationUrlController.text.isNotEmpty) {
-      location = {};
-      if (_locationController.text.isNotEmpty) {
-        location['label'] = _locationController.text.trim();
-      }
-      if (_locationUrlController.text.isNotEmpty) {
-        location['url'] = _locationUrlController.text.trim();
-        // Also store as locationUrl for backward compatibility
-        location['locationUrl'] = _locationUrlController.text.trim();
-      }
+    // Prepare location data - always create map to ensure we can clear if needed
+    Map<String, dynamic> location = {};
+    if (_locationController.text.isNotEmpty) {
+      location['label'] = _locationController.text.trim();
+    }
+    if (_locationUrlController.text.isNotEmpty) {
+      location['url'] = _locationUrlController.text.trim();
+      // Also store as locationUrl for backward compatibility
+      location['locationUrl'] = _locationUrlController.text.trim();
     }
 
     // Get categoryId from lecture (required for conflict check)
@@ -1004,14 +1244,30 @@ class _EditLectureFormState extends State<EditLectureForm> {
       hierarchyProvider.clearHomeHierarchyCache();
       hierarchyProvider.loadHomeHierarchy(forceRefresh: true);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تم تحديث المحاضرة بنجاح'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      // Pop with refresh=true to trigger reload in parent screen
-      Navigator.pop(context, true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم تحديث المحاضرة بنجاح'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Pop with refresh=true to trigger reload in parent screen
+        Navigator.pop(context, true);
+      }
+    } else {
+      // Error is already set in LectureProvider, and will be shown in the UI
+      // via the Consumer widget that displays errorMessage
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              lectureProvider.errorMessage ?? 'حدث خطأ أثناء تحديث المحاضرة',
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     }
   }
 }

@@ -10,7 +10,7 @@ class AppDatabase {
   static Database? _database;
   static Future<void>? _initFuture;
   static const int _currentVersion =
-      12; // Bumped for subcategory soft delete (isDeleted, deletedAt)
+      13; // Bumped for PDF attachment support (pdfUrl, pdfFileName, pdfType)
   static const String _dbName = 'main_app.db'; // Single canonical DB file name
 
   AppDatabase._internal();
@@ -289,6 +289,9 @@ class AppDatabase {
             break;
           case 12:
             await _migrationV12(db);
+            break;
+          case 13:
+            await _migrationV13(db);
             break;
           default:
             developer.log(
@@ -1184,6 +1187,47 @@ class AppDatabase {
     }
 
     developer.log('[AppDatabase] Migration v12 completed');
+  }
+
+  /// Migration v13: Add PDF attachment columns to lectures table
+  Future<void> _migrationV13(Database db) async {
+    developer.log(
+      '[AppDatabase] Applying migration v13: Add PDF attachment fields to lectures',
+    );
+
+    try {
+      // Check if columns already exist
+      final columns = await db.rawQuery("PRAGMA table_info(lectures)");
+      final hasPdfUrl = columns.any((col) => col['name'] == 'pdfUrl');
+      final hasPdfFileName = columns.any((col) => col['name'] == 'pdfFileName');
+      final hasPdfType = columns.any((col) => col['name'] == 'pdfType');
+
+      if (!hasPdfUrl) {
+        await db.execute('ALTER TABLE lectures ADD COLUMN pdfUrl TEXT');
+        developer.log('[AppDatabase] Added pdfUrl column to lectures');
+      } else {
+        developer.log('[AppDatabase] pdfUrl column already exists');
+      }
+
+      if (!hasPdfFileName) {
+        await db.execute('ALTER TABLE lectures ADD COLUMN pdfFileName TEXT');
+        developer.log('[AppDatabase] Added pdfFileName column to lectures');
+      } else {
+        developer.log('[AppDatabase] pdfFileName column already exists');
+      }
+
+      if (!hasPdfType) {
+        await db.execute('ALTER TABLE lectures ADD COLUMN pdfType TEXT');
+        developer.log('[AppDatabase] Added pdfType column to lectures');
+      } else {
+        developer.log('[AppDatabase] pdfType column already exists');
+      }
+    } catch (e) {
+      developer.log('[AppDatabase] Error during v13 migration: $e');
+      rethrow;
+    }
+
+    developer.log('[AppDatabase] Migration v13 completed');
   }
 
   /// Ensure schema is applied - used for defensive retry
