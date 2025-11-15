@@ -1273,10 +1273,13 @@ class LocalRepository {
   }) async {
     try {
       return await _withRetry((db) async {
+        // Normalize section key to ensure consistency (handles both English and Arabic)
+        final normalizedSection = _normalizeSectionKey(section);
+
         final Map<String, dynamic> updateData = {
           'title': title,
           'description': description,
-          'section': section,
+          'section': normalizedSection,
           'updatedAt': nowMillis(),
         };
 
@@ -1290,6 +1293,12 @@ class LocalRepository {
           whereArgs: [id],
         );
 
+        // Log for diagnostics
+        developer.log(
+          '[LocalRepository] Updated lecture: id=$id, section=$normalizedSection (original=$section)',
+          name: 'updateLecture',
+        );
+
         return {'success': true, 'message': 'تم تحديث المحاضرة بنجاح'};
       }, 'updateLecture');
     } catch (e) {
@@ -1298,16 +1307,29 @@ class LocalRepository {
     }
   }
 
-  /// Delete lecture (soft delete - set status to 'deleted')
+  /// Delete lecture (soft delete - set isDeleted=1 and status='deleted')
   Future<bool> deleteLecture(String lectureId) async {
     try {
       return await _withRetry((db) async {
+        final now = nowMillis();
         await db.update(
           'lectures',
-          {'status': 'deleted', 'updatedAt': nowMillis()},
+          {
+            'isDeleted': 1,
+            'status': 'deleted',
+            'isPublished': 0,
+            'updatedAt': now,
+          },
           where: 'id = ?',
           whereArgs: [lectureId],
         );
+
+        // Log for diagnostics
+        developer.log(
+          '[LocalRepository] Deleted lecture: id=$lectureId, isDeleted=1, status=deleted, isPublished=0',
+          name: 'deleteLecture',
+        );
+
         return true;
       }, 'deleteLecture');
     } catch (e) {

@@ -5,16 +5,19 @@ import 'package:new_project/provider/lecture_provider.dart';
 import 'package:new_project/screens/add_lecture_page.dart';
 import 'package:new_project/screens/Edit_Lecture_Page.dart';
 import 'package:new_project/screens/Delete_Lecture_Page.dart';
+import 'package:new_project/utils/section_utils.dart';
 import '../utils/page_transition.dart';
 
 class AdminLectureManagementPage extends StatefulWidget {
   const AdminLectureManagementPage({super.key});
 
   @override
-  State<AdminLectureManagementPage> createState() => _AdminLectureManagementPageState();
+  State<AdminLectureManagementPage> createState() =>
+      _AdminLectureManagementPageState();
 }
 
-class _AdminLectureManagementPageState extends State<AdminLectureManagementPage> {
+class _AdminLectureManagementPageState
+    extends State<AdminLectureManagementPage> {
   final FirebaseService _firebaseService = FirebaseService();
   Map<String, int> _lectureStats = {};
   bool _isLoading = false;
@@ -29,19 +32,25 @@ class _AdminLectureManagementPageState extends State<AdminLectureManagementPage>
     setState(() => _isLoading = true);
     try {
       final lectures = await _firebaseService.getAllLectures();
-      
+
       Map<String, int> stats = {
         'الفقه': 0,
         'التفسير': 0,
         'الحديث': 0,
         'السيرة': 0,
       };
-      
+
       for (var lecture in lectures) {
-        String section = lecture['section'];
-        stats[section] = (stats[section] ?? 0) + 1;
+        // Normalize section key (handles both English keys like "fiqh" and Arabic names)
+        final sectionKey = normalizeSectionKey(lecture['section']?.toString());
+        // Convert to Arabic name for counting
+        final sectionNameAr = getSectionNameAr(sectionKey);
+        // Only count if it's a valid section
+        if (stats.containsKey(sectionNameAr)) {
+          stats[sectionNameAr] = (stats[sectionNameAr] ?? 0) + 1;
+        }
       }
-      
+
       setState(() {
         _lectureStats = stats;
         _isLoading = false;
@@ -85,8 +94,10 @@ class _AdminLectureManagementPageState extends State<AdminLectureManagementPage>
           _loadStats();
           // Refresh lecture provider
           if (mounted) {
-            Provider.of<LectureProvider>(context, listen: false)
-                .loadAllSections();
+            Provider.of<LectureProvider>(
+              context,
+              listen: false,
+            ).loadAllSections();
           }
         }
       },
@@ -101,10 +112,7 @@ class _AdminLectureManagementPageState extends State<AdminLectureManagementPage>
   }
 
   void _navigateToEditLectures() {
-    SmoothPageTransition.navigateTo(
-      context,
-      const EditLecturePage(),
-    ).then((_) {
+    SmoothPageTransition.navigateTo(context, const EditLecturePage()).then((_) {
       _loadStats();
       // Refresh lecture provider
       Provider.of<LectureProvider>(context, listen: false).loadAllSections();
@@ -112,10 +120,9 @@ class _AdminLectureManagementPageState extends State<AdminLectureManagementPage>
   }
 
   void _navigateToDeleteLectures() {
-    SmoothPageTransition.navigateTo(
-      context,
-      const DeleteLecturePage(),
-    ).then((_) {
+    SmoothPageTransition.navigateTo(context, const DeleteLecturePage()).then((
+      _,
+    ) {
       _loadStats();
       // Refresh lecture provider
       Provider.of<LectureProvider>(context, listen: false).loadAllSections();
@@ -125,7 +132,7 @@ class _AdminLectureManagementPageState extends State<AdminLectureManagementPage>
   @override
   Widget build(BuildContext context) {
     final totalLectures = _lectureStats.values.fold(0, (a, b) => a + b);
-    
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('إدارة المحاضرات'),
@@ -205,59 +212,69 @@ class _AdminLectureManagementPageState extends State<AdminLectureManagementPage>
                     ),
                   ),
                   const SizedBox(height: 24),
-                  
+
                   // إحصائيات حسب القسم
                   const Text(
                     'المحاضرات حسب الأقسام',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     textAlign: TextAlign.right,
                   ),
                   const SizedBox(height: 12),
-                  
+
                   Row(
                     children: [
                       Expanded(
-                        child: _buildStatCard('الفقه', _lectureStats['الفقه'] ?? 0, 
-                            Colors.blue, Icons.menu_book),
+                        child: _buildStatCard(
+                          'الفقه',
+                          _lectureStats['الفقه'] ?? 0,
+                          Colors.blue,
+                          Icons.menu_book,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: _buildStatCard('التفسير', _lectureStats['التفسير'] ?? 0, 
-                            Colors.green, Icons.book),
+                        child: _buildStatCard(
+                          'التفسير',
+                          _lectureStats['التفسير'] ?? 0,
+                          Colors.green,
+                          Icons.book,
+                        ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  
+
                   Row(
                     children: [
                       Expanded(
-                        child: _buildStatCard('الحديث', _lectureStats['الحديث'] ?? 0, 
-                            Colors.orange, Icons.format_quote),
+                        child: _buildStatCard(
+                          'الحديث',
+                          _lectureStats['الحديث'] ?? 0,
+                          Colors.orange,
+                          Icons.format_quote,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: _buildStatCard('السيرة', _lectureStats['السيرة'] ?? 0, 
-                            Colors.purple, Icons.history_edu),
+                        child: _buildStatCard(
+                          'السيرة',
+                          _lectureStats['السيرة'] ?? 0,
+                          Colors.purple,
+                          Icons.history_edu,
+                        ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 32),
-                  
+
                   // أزرار الإدارة
                   const Text(
                     'العمليات',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     textAlign: TextAlign.right,
                   ),
                   const SizedBox(height: 12),
-                  
+
                   ElevatedButton.icon(
                     onPressed: _navigateToAddLecture,
                     icon: const Icon(Icons.add_circle_outline, size: 28),
@@ -276,7 +293,7 @@ class _AdminLectureManagementPageState extends State<AdminLectureManagementPage>
                     ),
                   ),
                   const SizedBox(height: 12),
-                  
+
                   ElevatedButton.icon(
                     onPressed: _navigateToEditLectures,
                     icon: const Icon(Icons.edit, size: 28),
@@ -295,7 +312,7 @@ class _AdminLectureManagementPageState extends State<AdminLectureManagementPage>
                     ),
                   ),
                   const SizedBox(height: 12),
-                  
+
                   ElevatedButton.icon(
                     onPressed: _navigateToDeleteLectures,
                     icon: const Icon(Icons.delete_outline, size: 28),
@@ -314,7 +331,7 @@ class _AdminLectureManagementPageState extends State<AdminLectureManagementPage>
                     ),
                   ),
                   const SizedBox(height: 24),
-                  
+
                   // ملاحظة
                   Container(
                     padding: const EdgeInsets.all(16),
@@ -364,10 +381,7 @@ class _AdminLectureManagementPageState extends State<AdminLectureManagementPage>
           const SizedBox(height: 8),
           Text(
             title,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade700,
-            ),
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
           ),
           const SizedBox(height: 4),
           Text(
