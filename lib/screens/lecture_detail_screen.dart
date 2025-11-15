@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:new_project/widgets/youtube_player_widget.dart';
 import 'package:new_project/widgets/audio_player_widget.dart';
 import 'package:new_project/utils/youtube_utils.dart';
+import 'package:new_project/utils/pdf_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:open_filex/open_filex.dart';
 import 'dart:io';
@@ -85,9 +86,13 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
         widget.lecture['media']?['audioUrl']?.toString() ??
         widget.lecture['audioUrl']?.toString();
 
-    // Extract PDF attachment
-    final pdfUrl = widget.lecture['pdfUrl']?.toString();
-    final pdfFileName = widget.lecture['pdfFileName']?.toString();
+    // Extract PDF attachment (check both direct fields and media field for backward compatibility)
+    final pdfUrl =
+        widget.lecture['pdfUrl']?.toString() ??
+        widget.lecture['media']?['pdfUrl']?.toString();
+    final pdfFileName =
+        widget.lecture['pdfFileName']?.toString() ??
+        widget.lecture['media']?['pdfFileName']?.toString();
     final hasPdf = pdfUrl != null && pdfUrl.isNotEmpty;
 
     // Only show player if videoId exists (extract from URL if needed)
@@ -557,8 +562,13 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
   }
 
   Future<void> _openPdf() async {
-    final pdfUrl = widget.lecture['pdfUrl']?.toString();
-    final pdfType = widget.lecture['pdfType']?.toString();
+    // Extract PDF data from both direct fields and media field for backward compatibility
+    final pdfUrl =
+        widget.lecture['pdfUrl']?.toString() ??
+        widget.lecture['media']?['pdfUrl']?.toString();
+    final pdfType =
+        widget.lecture['pdfType']?.toString() ??
+        widget.lecture['media']?['pdfType']?.toString();
 
     if (pdfUrl == null || pdfUrl.isEmpty) {
       if (mounted) {
@@ -573,7 +583,21 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
     }
 
     try {
-      if (pdfType == 'file') {
+      // Use utility function to detect if it's a URL or local file path
+      // This handles both explicit pdfType and automatic detection for backward compatibility
+      final isUrl = PdfUtils.isPdfUrl(pdfUrl, pdfType);
+
+      if (isUrl) {
+        // For remote URLs, use url_launcher to open in external browser/app
+        final uri = Uri.parse(pdfUrl.trim());
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          throw Exception(
+            'Cannot launch URL: Invalid or unsupported URL format',
+          );
+        }
+      } else {
         // For local files, use open_filex to avoid FileUriExposedException on Android 7+
         final file = File(pdfUrl);
         if (await file.exists()) {
@@ -582,15 +606,9 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
             throw Exception('Cannot open PDF file: ${result.message}');
           }
         } else {
-          throw Exception('PDF file not found');
-        }
-      } else {
-        // For URLs, use url_launcher
-        final uri = Uri.parse(pdfUrl);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        } else {
-          throw Exception('Cannot launch URL');
+          throw Exception(
+            'PDF file not found: The file path does not exist on the device',
+          );
         }
       }
     } catch (e) {
