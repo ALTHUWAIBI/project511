@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:new_project/provider/pro_login.dart';
 import 'package:new_project/provider/lecture_provider.dart';
-import 'package:new_project/screens/sheikh/sheikh_category_picker.dart';
 import 'package:new_project/screens/sheikh/add_lecture_form.dart';
 import 'package:new_project/screens/sheikh/edit_lecture_page.dart';
 import 'package:new_project/screens/sheikh/delete_lecture_page.dart';
 import 'package:new_project/screens/sheikh/sheikh_hierarchy_manage_screen.dart';
 import 'package:new_project/widgets/sheikh_guard.dart';
+import 'package:new_project/widgets/section_selection_dialog.dart';
 
 class SheikhHomePage extends StatefulWidget {
   const SheikhHomePage({super.key});
@@ -42,13 +42,14 @@ class _SheikhHomePageState extends State<SheikhHomePage> {
   }
 
   void _navigateToAdd() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const SheikhCategoryPicker()),
+    // Show dialog for section selection instead of navigating to full-screen page
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => const SectionSelectionDialog(),
     );
 
     // If a section was selected (result == true), navigate to AddLectureForm
-    if (result == true) {
+    if (result == true && mounted) {
       final addResult = await Navigator.push(
         context,
         MaterialPageRoute(builder: (context) => const AddLectureForm()),
