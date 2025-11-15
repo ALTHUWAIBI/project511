@@ -6,6 +6,7 @@ import 'package:new_project/screens/sheikh/add_lecture_form.dart';
 import 'package:new_project/screens/sheikh/edit_lecture_page.dart';
 import 'package:new_project/screens/sheikh/delete_lecture_page.dart';
 import 'package:new_project/screens/sheikh/sheikh_hierarchy_manage_screen.dart';
+import 'package:new_project/screens/sheikh/sheikh_lectures_list_page.dart';
 import 'package:new_project/widgets/sheikh_guard.dart';
 import 'package:new_project/widgets/section_selection_dialog.dart';
 
@@ -164,42 +165,66 @@ class _SheikhHomePageState extends State<SheikhHomePage> {
                           final stats = lectureProvider.sheikhStats;
                           final totalLectures = stats?['totalLectures'] ?? 0;
 
-                          return Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.green.shade50,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.green.shade200),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.library_books,
-                                  color: Colors.green,
-                                  size: 30,
-                                ),
-                                const SizedBox(width: 12),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'إجمالي المحاضرات',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.grey,
+                          return InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const SheikhLecturesListPage(
+                                        filter: 'all',
                                       ),
-                                    ),
-                                    Text(
-                                      '$totalLectures',
-                                      style: const TextStyle(
-                                        fontSize: 24,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.green,
-                                      ),
-                                    ),
-                                  ],
                                 ),
-                              ],
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Colors.green.shade200,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.library_books,
+                                    color: Colors.green,
+                                    size: 30,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'إجمالي المحاضرات',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                        Text(
+                                          '$totalLectures',
+                                          style: const TextStyle(
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.green,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.arrow_forward_ios,
+                                    color: Colors.green.shade400,
+                                    size: 20,
+                                  ),
+                                ],
+                              ),
                             ),
                           );
                         },
@@ -212,48 +237,64 @@ class _SheikhHomePageState extends State<SheikhHomePage> {
                           final stats = lectureProvider.sheikhStats;
                           final upcomingToday = stats?['upcomingToday'] ?? 0;
 
-                          return Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.shade50,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.blue.shade200),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.today,
-                                  color: Colors.blue,
-                                  size: 30,
-                                ),
-                                const SizedBox(width: 12),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'المحاضرات اليوم',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.grey,
+                          return InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const SheikhLecturesListPage(
+                                        filter: 'today',
                                       ),
-                                    ),
-                                    Text(
-                                      '$upcomingToday',
-                                      style: const TextStyle(
-                                        fontSize: 24,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.blue,
-                                      ),
-                                    ),
-                                  ],
                                 ),
-                                const Spacer(),
-                                Icon(
-                                  Icons.arrow_forward_ios,
-                                  color: Colors.blue.shade400,
-                                  size: 20,
-                                ),
-                              ],
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.blue.shade200),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.today,
+                                    color: Colors.blue,
+                                    size: 30,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'المحاضرات اليوم',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                        Text(
+                                          '$upcomingToday',
+                                          style: const TextStyle(
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.blue,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.arrow_forward_ios,
+                                    color: Colors.blue.shade400,
+                                    size: 20,
+                                  ),
+                                ],
+                              ),
                             ),
                           );
                         },
